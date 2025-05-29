@@ -3,15 +3,13 @@ import argparse
 import os
 import re
 import OLGen
+from OLGen import gen_ol
 from PIL import Image
 
-with open('scriptconfig.json', 'r', encoding = 'utf-8') as file:
-    CONFIG_FILE = json.load(file)
+from utils.redirect import file_redirect
+from utils.files import write_file
+from getConfig import CONFIG
 
-IMAGE_PATH = CONFIG_FILE["ImgPath"]
-TALENT_BG_PATH = CONFIG_FILE["TalentBGPath"]
-EXCEL_PATH = f'{CONFIG_FILE["RepoPath"]}/MappedExcelBinOutput_EN'
-OUTPUT_PATH = CONFIG_FILE['OutputPath']
 LINK_KEYWORDS = [
     'Nightsoul point',
     'Liquid Phlogiston',
@@ -61,29 +59,27 @@ parser.add_argument('--skilldepot', type=int)
 args = parser.parse_args()
 
 OLGen.load_data()
-gen_ol = OLGen.gen_ol
+
 
 def extract_last_digits(input_str):
-    # Extract the last 3 digits of the input string
     last_three_digits = input_str[-3:]
     
-    # If the first of these last 3 digits is '0', we return the last 2 digits
     if last_three_digits[0] == '0':
         return last_three_digits[-2:]
     else:
         return last_three_digits
     
 
-with open(f'{EXCEL_PATH}/AvatarSkillExcelConfigData.json', 'r', encoding='utf-8') as file:
+with open(f'{CONFIG.EXCEL_PATH}/AvatarSkillExcelConfigData.json', 'r', encoding='utf-8') as file:
     skillexcel = json.load(file)
         
-with open(f'{EXCEL_PATH}/ProudSkillExcelConfigData.json', 'r', encoding='utf-8') as file:
+with open(f'{CONFIG.EXCEL_PATH}/ProudSkillExcelConfigData.json', 'r', encoding='utf-8') as file:
     proudskillexcel = json.load(file)
     
-with open(f'{EXCEL_PATH}/AvatarTalentExcelConfigData.json', 'r', encoding='utf-8') as file:
+with open(f'{CONFIG.EXCEL_PATH}/AvatarTalentExcelConfigData.json', 'r', encoding='utf-8') as file:
     talentexcel = json.load(file)
     
-with open(f'{EXCEL_PATH}/HyperLinkNameExcelConifgData.json', 'r', encoding='utf-8') as file:
+with open(f'{CONFIG.EXCEL_PATH}/HyperLinkNameExcelConifgData.json', 'r', encoding='utf-8') as file:
     hyperlinkexcel = json.load(file)
     
 
@@ -122,45 +118,23 @@ character = ''
 
 passive_effects = {}
 cons_effects = {}
-
-        
-def write_file(file_write_path, file_write):
-    with open(file_write_path, 'w', encoding='utf-8') as file:
-        file.write(file_write)
-        print('Saved to ' + file_write_path + '.')           
-
-        
-def file_redirect(target, source):
-    if not os.path.exists(f'{OUTPUT_PATH}/Redirects'):
-            os.makedirs(f'{OUTPUT_PATH}/Redirects')
-    
-    file_write_path = f'{OUTPUT_PATH}/Redirects/{source}.wikitext'
-    file_write = f"<%-- [PAGE_INFO]\n    comment = #Please do not remove this struct. It's record contains some important information of edit. This struct will be removed automatically after you push edits.#\n    pageTitle = #File:{target}#\n    pageID = ##\n    revisionID = ##\n    contentModel = ##\n    contentFormat = ##\n[END_PAGE_INFO] --%>\n\n#REDIRECT [[File:{source}]]\n[[Category:Redirect Pages]]"
-    
-    write_file(file_write_path, file_write)
         
 
 def processIcon(path, type, name, folder):
     try:
-        icon = Image.open(f'{IMAGE_PATH}/{path}.png').convert('RGBA')
-        bg = Image.open(f'{TALENT_BG_PATH}/{type} {bg_element}.png').convert('RGBA')
+        icon = Image.open(f'{CONFIG.IMAGE_PATH}/{path}.png').convert('RGBA')
+        bg = Image.open(f'{CONFIG.TALENT_BG_PATH}/{type} {bg_element}.png').convert('RGBA')
 
-        # Calculate the position for the icon to be centered on the background
         x = (bg.width - icon.width) // 2
         y = (bg.height - icon.height) // 2
 
-        # Create an empty (transparent) base image with the same size as the background
         base_image = Image.new('RGBA', bg.size, (0, 0, 0, 0))
-        
-        # Paste the icon onto the base image at the calculated position
+
         base_image.paste(icon, (x, y), None)
 
-        # Blend the base image (with the icon) onto the background
-        # This ensures the icon's transparency is respected without altering the background's transparency
         final_image = Image.alpha_composite(bg, base_image)
 
-        # Ensure the output directory exists
-        output_path = f'{OUTPUT_PATH}/Images/{folder}'
+        output_path = f'{CONFIG.OUTPUT_PATH}/Images/{folder}'
         if not os.path.exists(output_path):
             os.makedirs(output_path)
             
@@ -169,7 +143,6 @@ def processIcon(path, type, name, folder):
         if file_name_clean != name:
             file_redirect(f'{name}.png', f'{file_name_clean}.png')
 
-        # Save the final image
         final_image.save(f'{output_path}/{file_name_clean}.png')
         print(f'Processed icon saved to: {output_path}/{file_name_clean}.png')
     except FileNotFoundError as error:
@@ -197,19 +170,16 @@ def parse_hyperlink(desc):
         
         
 def add_wikilinks(ability_description):
-    # Step 1: Mask all {{Extra Effect|...}} blocks
     extra_effect_blocks = []
     def mask_extra_effect(match):
         extra_effect_blocks.append(match.group(0))
         return f"__EXTRA_EFFECT_{len(extra_effect_blocks)-1}__"
     masked_desc = re.sub(r'\{LINK#N.*?\}.*?\{/LINK\}', mask_extra_effect, ability_description)
 
-    # Step 2: Add wikilinks to keywords outside masked blocks
     for keyword in LINK_KEYWORDS:
         pattern = r'(?<!\[\[)\b(' + re.escape(keyword) + r')(\b|(?=s))(?!\]\])'
         masked_desc = re.sub(pattern, r'[[\1]]', masked_desc, count=1, flags=re.IGNORECASE)
 
-    # Step 3: Restore the masked blocks
     def unmask_extra_effect(match):
         idx = int(match.group(1))
         return extra_effect_blocks[idx]
@@ -572,13 +542,13 @@ def get_cons_effects(id, i):
                 cons_effects[ability].append([name, i + 1])
 
 
-with open(f'{EXCEL_PATH}/AvatarExcelConfigData.json', 'r', encoding='utf-8') as file:
+with open(f'{CONFIG.EXCEL_PATH}/AvatarExcelConfigData.json', 'r', encoding='utf-8') as file:
     avatarconfig = json.load(file)
     
-with open(f'{EXCEL_PATH}/AvatarSkillDepotExcelConfigData.json', 'r', encoding='utf-8') as file:
+with open(f'{CONFIG.EXCEL_PATH}/AvatarSkillDepotExcelConfigData.json', 'r', encoding='utf-8') as file:
     skilldepotconfig = json.load(file)
     
-with open(f'{EXCEL_PATH}/FetterInfoExcelConfigData.json', 'r', encoding='utf-8') as file:
+with open(f'{CONFIG.EXCEL_PATH}/FetterInfoExcelConfigData.json', 'r', encoding='utf-8') as file:
     fetterinfoconfig = json.load(file)
      
 if not char_id == "None":
@@ -600,14 +570,13 @@ if not char_id == "None":
         if block['Id'] == skilldepotid:
             skilldepot: dict = block
 
-    if not os.path.exists(f'{OUTPUT_PATH}/{character}/Skills'):
-        os.makedirs(f'{OUTPUT_PATH}/{character}/Skills')
-    if not os.path.exists(f'{OUTPUT_PATH}/{character}/Passives'):
-        os.makedirs(f'{OUTPUT_PATH}/{character}/Passives')
-    if not os.path.exists(f'{OUTPUT_PATH}/{character}/Constellations'):
-        os.makedirs(f'{OUTPUT_PATH}/{character}/Constellations')
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/{character}/Skills'):
+        os.makedirs(f'{CONFIG.OUTPUT_PATH}/{character}/Skills')
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/{character}/Passives'):
+        os.makedirs(f'{CONFIG.OUTPUT_PATH}/{character}/Passives')
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/{character}/Constellations'):
+        os.makedirs(f'{CONFIG.OUTPUT_PATH}/{character}/Constellations')
         
-    # Create a dictionary to store the names of the character's abilities
     ability_dict = {}
     
     ability_dict['Normal Attack'] = get_skill_name(ability_list[0][0](skilldepot))
@@ -616,35 +585,30 @@ if not char_id == "None":
     ability_dict['1st Ascension Passive'] = get_passive_name(passive_list[0][0](skilldepot))
     ability_dict['4th Ascension Passive'] = get_passive_name(passive_list[1][0](skilldepot))
     
-    # Create passive effects dictionary
     for i, passive in enumerate(passive_list):
         if i < 2:
             get_passive_effects(passive[0](skilldepot), i)
     print('Passive effects:', passive_effects)
     
-    # Create constellation effects dictionary
     for i, cons in enumerate(cons_list):
         get_cons_effects(cons[0](skilldepot), i)
     print('Constellation effects:', cons_effects)
         
     for ability in ability_list:
-        file_write_path = f'{OUTPUT_PATH}/{character}/Skills/{ability[1]}.wikitext'
+        file_write_path = f'{CONFIG.OUTPUT_PATH}/{character}/Skills/{ability[1]}.wikitext'
         id = ability[0](skilldepot)
-        with open(file_write_path, 'w', encoding='utf-8') as file:
-            file.write(parse_skill(id, ver, ability[2], ability_dict))
-        print('Saved to ' + file_write_path + '.')
+        
+        write_file(file_write_path, parse_skill(id, ver, ability[2], ability_dict))
         
     for passive in passive_list:
-        file_write_path = f'{OUTPUT_PATH}/{character}/Passives/{passive[1]}.wikitext'
+        file_write_path = f'{CONFIG.OUTPUT_PATH}/{character}/Passives/{passive[1]}.wikitext'
         id = passive[0](skilldepot)
-        with open(file_write_path, 'w', encoding='utf-8') as file:
-            file.write(parse_passive(id, ver, passive[2], ability_dict))
-        print('Saved to ' + file_write_path + '.')
+        
+        write_file(file_write_path, parse_passive(id, ver, passive[2], ability_dict))
         
     for cons in cons_list:
-        file_write_path = f'{OUTPUT_PATH}/{character}/Constellations/{cons[1]}.wikitext'
+        file_write_path = f'{CONFIG.OUTPUT_PATH}/{character}/Constellations/{cons[1]}.wikitext'
         id = cons[0](skilldepot)
-        with open(file_write_path, 'w', encoding='utf-8') as file:
-            file.write(parse_cons(id, ver, ability_dict))
-        print('Saved to ' + file_write_path + '.')
+        
+        write_file(file_write_path, parse_cons(id, ver, ability_dict))
     

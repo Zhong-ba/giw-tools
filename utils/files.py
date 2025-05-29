@@ -2,14 +2,15 @@ import os
 import shutil
 
 
-def write_file(filename, content):
-    base, ext = os.path.splitext(filename)
-    counter = 1
+def write_file(filename, content, overwrite = False):
     new_filename = filename
 
-    while os.path.exists(new_filename):
-        counter += 1
-        new_filename = f"{base}_{counter}{ext}"
+    if not overwrite:
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(new_filename):
+            counter += 1
+            new_filename = f"{base}_{counter}{ext}"
 
     with open(new_filename, 'w', encoding = 'utf-8') as file:
         file.write(content)
