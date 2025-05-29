@@ -2,23 +2,16 @@ import json
 import argparse
 import re
 import os
-import shutil
 import Levenshtein # type: ignore
 from PIL import Image, ImageDraw
-import OLGen
 from decimal import Decimal
 
-with open('scriptconfig.json', 'r', encoding = 'utf-8') as file:
-    CONFIG_FILE = json.load(file)
+from utils.files import write_file, copy_file
+from utils.misc import dict_to_table, capkeys
+import OLGen
+from OLGen import gen_ol
 
-IMAGE_PATH = CONFIG_FILE["ImgPath"]
-TALENT_BG_PATH = CONFIG_FILE["TalentBGPath"]
-EXCEL_PATH = f'{CONFIG_FILE["RepoPath"]}/MappedExcelBinOutput_EN'
-EXCEL_PATH_OLD = f'{CONFIG_FILE["RepoPathOld"]}/MappedExcelBinOutput_EN'
-BIN_PATH = f'{CONFIG_FILE["RepoPath"]}/BinOutput'
-OUTPUT_PATH = CONFIG_FILE["OutputPath"]
-
-gen_ol = OLGen.gen_ol
+from getConfig import CONFIG
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--blessingscan', type = bool)
@@ -34,95 +27,15 @@ parser.add_argument('--redirectfromstr', type = str)
 
 args = parser.parse_args()
 
-if not os.path.exists(OUTPUT_PATH):
-    os.makedirs(OUTPUT_PATH)
+if not os.path.exists(CONFIG.OUTPUT_PATH):
+    os.makedirs(CONFIG.OUTPUT_PATH)
 
-
-def fix_str(str_input):
-    return str_input.replace('"', r'\"')
-
-
-def capitalize_keys_in_json_files():
-    for root, dirs, files in os.walk(EXCEL_PATH):
-        for file in files:
-            if file.endswith('.json'):
-                file_path = os.path.join(root, file)
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                # Function to capitalize keys
-                def capitalize_keys(obj):
-                    if isinstance(obj, dict):
-                        new_obj = {}
-                        for k, v in obj.items():
-                            new_key = k.capitalize() if k and k[0].islower() else k
-                            new_obj[new_key] = capitalize_keys(v)
-                        return new_obj
-                    elif isinstance(obj, list):
-                        return [capitalize_keys(item) for item in obj]
-                    else:
-                        return obj
-                
-                # Capitalize keys in the JSON data
-                new_data = capitalize_keys(data)
-                
-                # Save the modified JSON data back to the file
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(new_data, f, indent=2, ensure_ascii=False)
-
-
-def python_dict_to_lua_table(python_dict, indent = 0):
-    indent_str = '\t' * indent  # indentation string
-    lua_table = "{\n"
-    for key, value in python_dict.items():
-        # Assuming keys are strings
-        lua_key = f'{indent_str}\t["{fix_str(key)}"]'
-        if isinstance(value, str):
-            lua_value = f'"{fix_str(value)}"'
-        elif isinstance(value, dict):
-            # recursive call for nested dictionaries with increased indent
-            lua_value = python_dict_to_lua_table(value, indent + 1)
-        elif isinstance(value, list):
-            # Process list to Lua table format
-            list_values = ", ".join([f'"{fix_str(item)}"' if isinstance(item, str) else str(item) for item in value])
-            lua_value = "{" + list_values + "}"
-        else:
-            lua_value = str(value)
-        lua_table += f"{lua_key} = {lua_value},\n"
-    lua_table += f"{indent_str}}}"
-
-    return lua_table
-
-
-def write_file(filename, content):
-    base, ext = os.path.splitext(filename)
-    counter = 1
-    new_filename = filename
-
-    while os.path.exists(new_filename):
-        counter += 1
-        new_filename = f"{base}_{counter}{ext}"
-
-    with open(new_filename, 'w', encoding = 'utf-8') as file:
-        file.write(content)
-        
-
-def copy_file(source_path, destination_path):
-    if os.path.exists(source_path):
-        dest_dir = destination_path.replace(destination_path.split('/')[-1], '')
-        if not os.path.exists(dest_dir):
-            os.makedirs(dest_dir)
-        shutil.copy(source_path, destination_path)
-        print(f"File copied successfully from {source_path} to {destination_path}")
-    else:
-        print(f"The file {source_path} does not exist.")
-        
 
 def file_redirect(target, source):
-    if not os.path.exists(f'{OUTPUT_PATH}/Redirects'):
-        os.makedirs(f'{OUTPUT_PATH}/Redirects')
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Redirects'):
+        os.makedirs(f'{CONFIG.OUTPUT_PATH}/Redirects')
 
-    file_write_path = f'{OUTPUT_PATH}/Redirects/{source}.wikitext'
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{source}.wikitext'
     file_write = (f"<%-- [PAGE_INFO]\n    comment = #Please do not remove this struct. It's record contains some "
                   f"important information of edit. This struct will be removed automatically after you push edits.#\n "
                   f"   pageTitle = #File:{target}#\n    pageID = ##\n    revisionID = ##\n    contentModel = ##\n    "
@@ -133,12 +46,12 @@ def file_redirect(target, source):
     
 
 def main_redirect(target, source):
-    if not os.path.exists(f'{OUTPUT_PATH}/Redirects'):
-        os.makedirs(f'{OUTPUT_PATH}/Redirects')
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Redirects'):
+        os.makedirs(f'{CONFIG.OUTPUT_PATH}/Redirects')
         
     filename = re.sub(r'[^\w\s]', '', source)
 
-    file_write_path = f'{OUTPUT_PATH}/Redirects/{filename}.wikitext'
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{filename}.wikitext'
     file_write = (f"<%-- [PAGE_INFO]\n    comment = #Please do not remove this struct. It's record contains some "
                   f"important information of edit. This struct will be removed automatically after you push edits.#\n "
                   f"   pageTitle = #{source}#\n    pageID = ##\n    revisionID = ##\n    contentModel = ##\n    "
@@ -151,16 +64,16 @@ def main_redirect(target, source):
 def ls_blessing_scan_targets(type_id):
     valid_list = []
 
-    with open(f'{EXCEL_PATH}/BlessingScanExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/BlessingScanExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         blessingscanexcel = json.load(file)
 
-    with open(f'{EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         monsterexcel = json.load(file)
 
-    with open(f'{EXCEL_PATH}/GadgetExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/GadgetExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         gadgetexcel = json.load(file)
 
-    with open(f'{EXCEL_PATH}/AnimalDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/AnimalDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         animaldescribeexcel = json.load(file)
 
     for item in blessingscanexcel:
@@ -197,7 +110,7 @@ def ls_blessing_scan_targets(type_id):
 
 
 def parse_blessing_scan():
-    with open(f'{EXCEL_PATH}/BlessingScanTypeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/BlessingScanTypeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         blessingscantypeexcel = json.load(file)
 
     output = ""
@@ -217,18 +130,18 @@ def parse_blessing_scan():
 
 
 def parse_tcg_icon():
-    with open(f'{EXCEL_PATH}/GCGCharExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/GCGCharExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         gcgcharjson = json.load(file)
 
-    with open(f'{EXCEL_PATH}/GCGSkillExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/GCGSkillExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         gcgskilljson = json.load(file)
         
 
 def parse_charasc():
-    with open(f'{EXCEL_PATH}/AvatarExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/AvatarExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         avatarjson = json.load(file)
     
-    with open(f'{EXCEL_PATH}/AvatarPromoteExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/AvatarPromoteExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         promotejson = json.load(file)
     
     banned_names = ['Kate']
@@ -507,10 +420,10 @@ def parse_enemy_stats_weight(in_dict: dict):
     config_hash = in_dict.get('CombatConfigHash')
     config_startswith = hex(config_hash)[8:16]
     
-    config, _ = find_similar_file(f'{BIN_PATH}/Monster', config_startswith)
+    config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', config_startswith)
     
     if not config:
-        config, _ = find_similar_file(f'{BIN_PATH}/Monster', f'ConfigMonster_{internal_name}')
+        config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', f'ConfigMonster_{internal_name}')
     
     weight = None
     if config:
@@ -543,10 +456,10 @@ def parse_enemy_stats_enduretype(in_dict: dict):
     config_hash = in_dict.get('CombatConfigHash')
     config_startswith = hex(config_hash)[8:16]
     
-    config, _ = find_similar_file(f'{BIN_PATH}/Monster', config_startswith)
+    config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', config_startswith)
     
     if not config:
-        config, _ = find_similar_file(f'{BIN_PATH}/Monster', f'ConfigMonster_{internal_name}')
+        config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', f'ConfigMonster_{internal_name}')
     
     et = None
     if config:
@@ -563,19 +476,19 @@ def parse_enemy_stats_enduretype(in_dict: dict):
 
 
 def parse_new_enemies():    
-    if not os.path.exists(f'{OUTPUT_PATH}/Enemies'):
-            os.makedirs(f'{OUTPUT_PATH}/Enemies')
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Enemies'):
+            os.makedirs(f'{CONFIG.OUTPUT_PATH}/Enemies')
     
-    with open(f'{EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         monsterexcel = json.load(file)
         
-    with open(f'{EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.CONFIG.EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         monsterexcel_old = json.load(file)
         
-    with open(f'{EXCEL_PATH}/MonsterDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/MonsterDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         describeexcel = {item['Id']: item for item in json.load(file)}
         
-    with open(f'{EXCEL_PATH}/AnimalCodexExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/AnimalCodexExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         codexexcel = {item['Id']: item for item in json.load(file)}
         
     # build list of old enemies
@@ -611,7 +524,7 @@ def parse_new_enemies():
         if out_name != out_name_clean:
             file_redirect(out_name, out_name_clean)
         
-        copy_file(f'{IMAGE_PATH}/{icon_filename}.png', f'{OUTPUT_PATH}/Images/Enemy Icons/{out_name_clean}')
+        copy_file(f'{CONFIG.IMAGE_PATH}/{icon_filename}.png', f'{CONFIG.OUTPUT_PATH}/Images/Enemy Icons/{out_name_clean}')
         
         # codex
         desc = ''
@@ -697,18 +610,18 @@ def parse_new_enemies():
 ==Navigation==
 {{{{Enemy Navbox|{tier[1]}}}}}"""
             
-        file_write_path_2 = f'{OUTPUT_PATH}/Enemies/{name.replace(":", "").replace("?", r"%3F")}.wikitext'
+        file_write_path_2 = f'{CONFIG.OUTPUT_PATH}/Enemies/{name.replace(":", "").replace("?", r"%3F")}.wikitext'
         write_file(file_write_path_2, file_write_2)    
     
 
 def parse_new_enemies_2():
     file_write = '<!-------------- HP --------------->'
-    file_write_path = f'{OUTPUT_PATH}/New_Enemies_Output.wikitext'
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/New_Enemies_Output.wikitext'
     
-    with open(f'{EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         monsterexcel = json.load(file)
         
-    with open(f'{EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.CONFIG.EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         monsterexcel_old = json.load(file)
         
     # build list of old enemies
@@ -811,13 +724,13 @@ def parse_fishing_points():
 |total         = 13
 }}'''
     
-    with open(f'{EXCEL_PATH}/FishPoolExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/FishPoolExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         poolexcel = {item['Id']: item for item in json.load(file)}
         
-    with open(f'{EXCEL_PATH_OLD}/FishPoolExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.CONFIG.EXCEL_PATH_OLD}/FishPoolExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         poolexcel_old = {item['Id']: item for item in json.load(file)}
         
-    with open(f'{EXCEL_PATH_OLD}/../Testing/fishstock.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.CONFIG.EXCEL_PATH_OLD}/../Testing/fishstock.json', 'r', encoding = 'utf-8') as file:
         fishstock = {item['Id']: item for item in json.load(file)}
     
     for id, item in poolexcel.items():
@@ -829,13 +742,13 @@ def parse_fishing_points():
         
 
 def parse_hunting_v2():
-    with open(f'{EXCEL_PATH}/HuntingV2MonsterBundleExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/HuntingV2MonsterBundleExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         bundleexcel = {item['Id']: item for item in json.load(file)}
     
-    with open(f'{EXCEL_PATH}/HuntingV2RegionExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/HuntingV2RegionExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         regionexcel = {item['Id']: item for item in json.load(file)}
         
-    with open(f'{EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         monsterexcel = {item['Id']: item for item in json.load(file)}
         
     file_write = ''        
@@ -871,13 +784,13 @@ def parse_hunting_v2():
 |notes      = 
 }}}}'''
 
-    file_write_path = f'{OUTPUT_PATH}/Bounties_V2_Output.wikitext'
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/Bounties_V2_Output.wikitext'
     
     write_file(file_write_path, file_write)
     
 
 def parse_cooking_qte():
-    with open(f'{EXCEL_PATH}/CookRecipeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+    with open(f'{CONFIG.EXCEL_PATH}/CookRecipeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         recipeexcel = {item['Id']: item for item in json.load(file)}
     
     out = {}
@@ -889,9 +802,9 @@ def parse_cooking_qte():
         out[name]['center'] = float(qteparams[0])
         out[name]['width'] = float(qteparams[1])
         
-    file_write_path = f'{OUTPUT_PATH}/Recipe_Output.lua'
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/Recipe_Output.lua'
     
-    write_file(file_write_path, f'return {python_dict_to_lua_table(out)}')
+    write_file(file_write_path, f'return {dict_to_table(out)}')
     
 
 def clamp(n, min_value, max_value):
@@ -966,15 +879,15 @@ def cooking_qte_image_gen(center, length):
     # Save
     filename = f'Manual Cooking C-{int(center * 100)} W-{int(length * 100)}.png'
     try:
-        final_image.save(f'{OUTPUT_PATH}/Cooking_QTE/{filename}')
+        final_image.save(f'{CONFIG.OUTPUT_PATH}/Cooking_QTE/{filename}')
         print(f'Successfully saved {filename}')
     except Exception as e:
         print(f'Error saving {filename}: {e}')
 
 
 def cooking_qte_2():
-    if not os.path.exists(f'{OUTPUT_PATH}/Cooking_QTE'):
-        os.makedirs(f'{OUTPUT_PATH}/Cooking_QTE')
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Cooking_QTE'):
+        os.makedirs(f'{CONFIG.OUTPUT_PATH}/Cooking_QTE')
     
     for center in [0.3, 0.38, 0.4, 0.45, 0.48, 0.5, 0.52, 0.55, 0.6, 0.63, 0.65, 0.7, 0.72, 0.77, 0.8, 0.85]:
         for length in [0.17, 0.22, 0.27, 0.35, 0.4]:
@@ -1027,7 +940,7 @@ if args.cookingqte2:
     cooking_qte_2()
     
 if args.capkeys:
-    capitalize_keys_in_json_files()
+    capkeys()
     
 if args.redirectfromstr:
     redirects_from_str()
