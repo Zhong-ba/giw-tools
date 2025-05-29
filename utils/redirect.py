@@ -3,34 +3,27 @@ import re
 
 from getConfig import CONFIG
 from utils.files import write_file
+from utils.pageinfo import pageinfo
 
 
-def file_redirect(target, source):
+def file_redirect(source, target):
     if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Redirects'):
         os.makedirs(f'{CONFIG.OUTPUT_PATH}/Redirects')
 
     file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{source}.wikitext'
-    file_write = (f"<%-- [PAGE_INFO]\n    comment = #Please do not remove this struct. It's record contains some "
-                  f"important information of edit. This struct will be removed automatically after you push edits.#\n "
-                  f"   pageTitle = #File:{target}#\n    pageID = ##\n    revisionID = ##\n    contentModel = ##\n    "
-                  f"contentFormat = ##\n[END_PAGE_INFO] --%>\n\n#REDIRECT [[File:{source}]]\n[[Category:Redirect "
-                  f"Pages]]")
+    file_write = f"{pageinfo('File:' + source)}\n#REDIRECT [[File:{target}]]\n[[Category:Redirect Pages]]"
 
     write_file(file_write_path, file_write)
     
 
-def main_redirect(target, source):
+def main_redirect(source, target):
     if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Redirects'):
         os.makedirs(f'{CONFIG.OUTPUT_PATH}/Redirects')
         
     filename = re.sub(r'[^\w\s]', '', source)
 
     file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{filename}.wikitext'
-    file_write = (f"<%-- [PAGE_INFO]\n    comment = #Please do not remove this struct. It's record contains some "
-                  f"important information of edit. This struct will be removed automatically after you push edits.#\n "
-                  f"   pageTitle = #{source}#\n    pageID = ##\n    revisionID = ##\n    contentModel = ##\n    "
-                  f"contentFormat = ##\n[END_PAGE_INFO] --%>\n\n#REDIRECT [[{target}]]\n[[Category:Redirect "
-                  f"Pages]]")
+    file_write = f"{pageinfo(source)}\n#REDIRECT [[{target}]]\n[[Category:Redirect Pages]]"
 
     write_file(file_write_path, file_write)
     
@@ -39,4 +32,4 @@ def redirects_from_str(in_str):
     for line in in_str.split("\n"):
         pagename, target = line.split(r"%%%")
         
-        main_redirect(target, pagename)
+        main_redirect(pagename, target)

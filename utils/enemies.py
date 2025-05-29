@@ -6,6 +6,7 @@ import Levenshtein # type: ignore
 from getConfig import CONFIG
 from utils.files import write_file, copy_file
 from utils.redirect import file_redirect
+from utils.pageinfo import pageinfo
 
 PARTICLE_IDS = {
     22010010: ['None', 0, 1],
@@ -382,15 +383,7 @@ def parse_new_enemies(args, gen_ol):
         # OL
         ol = gen_ol(name)
         
-        file_write_2 = f"""<%-- [PAGE_INFO]
-    comment = #Please do not remove this struct. It's record contains some important information of edit. This struct will be removed automatically after you push edits.#
-    pageTitle = #{name}#
-    pageID = ##
-    revisionID = ##
-    contentModel = ##
-    contentFormat = ##
-[END_PAGE_INFO] --%>
-
+        file_write_2 = f"""{pageinfo(name)}
 {{{{Enemy Infobox
 |title     = 
 |dmgtype   = unknown

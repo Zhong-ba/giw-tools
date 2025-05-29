@@ -8,6 +8,7 @@ from PIL import Image
 
 from utils.redirect import file_redirect
 from utils.files import write_file
+from utils.pageinfo import pageinfo
 from getConfig import CONFIG
 
 LINK_KEYWORDS = [
@@ -267,15 +268,7 @@ def parse_skill(id, ver, type = None, ability_dict = None):
             passive_effect_wikitext = f'{passive_effect_wikitext}\n'
             cons_effects_wikitext = f'{cons_effects_wikitext}\n'
             
-    page_content = f"""<%-- [PAGE_INFO]
-    comment = #Please do not remove this struct. It's record contains some important information of edit. This struct will be removed automatically after you push edits.#
-    pageTitle = #{name}#
-    pageID = ##
-    revisionID = ##
-    contentModel = ##
-    contentFormat = ##
-[END_PAGE_INFO] --%>
-
+    page_content = f"""{pageinfo(name)}
 {{{{Talent Infobox
 |image         = Talent {name}.png
 |character     = {character}
@@ -360,15 +353,7 @@ def parse_passive(id, ver, type = None, ability_dict = None):
     desc = add_wikilinks(desc)
     desc = parse_hyperlink(desc)
 
-    page_content = f"""<%-- [PAGE_INFO]
-    comment = #Please do not remove this struct. It's record contains some important information of edit. This struct will be removed automatically after you push edits.#
-    pageTitle = #{name}#
-    pageID = ##
-    revisionID = ##
-    contentModel = ##
-    contentFormat = ##
-[END_PAGE_INFO] --%>
-
+    page_content = f"""{pageinfo(name)}
 {{{{Talent Infobox
 |image         = Talent {name}.png
 |character     = {character}
@@ -437,15 +422,7 @@ def parse_cons(id, ver, ability_dict):
     desc = add_wikilinks(desc)
     desc = parse_hyperlink(desc)
     
-    page_content = f"""<%-- [PAGE_INFO]
-    comment = #Please do not remove this struct. It's record contains some important information of edit. This struct will be removed automatically after you push edits.#
-    pageTitle = #{name}#
-    pageID = ##
-    revisionID = ##
-    contentModel = ##
-    contentFormat = ##
-[END_PAGE_INFO] --%>
-
+    page_content = f"""{pageinfo(name)}
 {{{{Constellation Infobox
 |image         = Constellation {name}.png
 |character     = {character}
