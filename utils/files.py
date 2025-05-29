@@ -14,6 +14,8 @@ def write_file(filename, content):
     with open(new_filename, 'w', encoding = 'utf-8') as file:
         file.write(content)
         
+    print(f"File saved successfully: {new_filename}")
+        
 
 def copy_file(source_path, destination_path):
     if os.path.exists(source_path):
