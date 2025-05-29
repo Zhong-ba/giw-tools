@@ -33,3 +33,10 @@ def main_redirect(target, source):
                   f"Pages]]")
 
     write_file(file_write_path, file_write)
+    
+    
+def redirects_from_str(in_str):
+    for line in in_str.split("\n"):
+        pagename, target = line.split(r"%%%")
+        
+        main_redirect(target, pagename)
