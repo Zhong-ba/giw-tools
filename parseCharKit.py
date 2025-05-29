@@ -598,17 +598,17 @@ if not char_id == "None":
         file_write_path = f'{CONFIG.OUTPUT_PATH}/{character}/Skills/{ability[1]}.wikitext'
         id = ability[0](skilldepot)
         
-        write_file(file_write_path, parse_skill(id, ver, ability[2], ability_dict))
+        write_file(file_write_path, parse_skill(id, ver, ability[2], ability_dict), overwrite = True)
         
     for passive in passive_list:
         file_write_path = f'{CONFIG.OUTPUT_PATH}/{character}/Passives/{passive[1]}.wikitext'
         id = passive[0](skilldepot)
         
-        write_file(file_write_path, parse_passive(id, ver, passive[2], ability_dict))
+        write_file(file_write_path, parse_passive(id, ver, passive[2], ability_dict), overwrite = True)
         
     for cons in cons_list:
         file_write_path = f'{CONFIG.OUTPUT_PATH}/{character}/Constellations/{cons[1]}.wikitext'
         id = cons[0](skilldepot)
         
-        write_file(file_write_path, parse_cons(id, ver, ability_dict))
+        write_file(file_write_path, parse_cons(id, ver, ability_dict), overwrite = True)
     
