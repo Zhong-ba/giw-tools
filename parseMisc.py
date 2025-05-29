@@ -6,6 +6,7 @@ import Levenshtein # type: ignore
 from decimal import Decimal
 
 from utils.files import write_file, copy_file
+from utils.redirect import file_redirect, main_redirect
 import OLGen
 from OLGen import gen_ol
 
@@ -13,7 +14,6 @@ from getConfig import CONFIG
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--blessingscan', type = bool)
-parser.add_argument('--tcgicon', type = str)
 parser.add_argument('--newenemies', type = str)
 parser.add_argument('--fishingpoints', type = str)
 parser.add_argument('--huntingv2', type = str)
@@ -27,104 +27,6 @@ args = parser.parse_args()
 
 if not os.path.exists(CONFIG.OUTPUT_PATH):
     os.makedirs(CONFIG.OUTPUT_PATH)
-
-
-def file_redirect(target, source):
-    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Redirects'):
-        os.makedirs(f'{CONFIG.OUTPUT_PATH}/Redirects')
-
-    file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{source}.wikitext'
-    file_write = (f"<%-- [PAGE_INFO]\n    comment = #Please do not remove this struct. It's record contains some "
-                  f"important information of edit. This struct will be removed automatically after you push edits.#\n "
-                  f"   pageTitle = #File:{target}#\n    pageID = ##\n    revisionID = ##\n    contentModel = ##\n    "
-                  f"contentFormat = ##\n[END_PAGE_INFO] --%>\n\n#REDIRECT [[File:{source}]]\n[[Category:Redirect "
-                  f"Pages]]")
-
-    write_file(file_write_path, file_write)
-    
-
-def main_redirect(target, source):
-    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Redirects'):
-        os.makedirs(f'{CONFIG.OUTPUT_PATH}/Redirects')
-        
-    filename = re.sub(r'[^\w\s]', '', source)
-
-    file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{filename}.wikitext'
-    file_write = (f"<%-- [PAGE_INFO]\n    comment = #Please do not remove this struct. It's record contains some "
-                  f"important information of edit. This struct will be removed automatically after you push edits.#\n "
-                  f"   pageTitle = #{source}#\n    pageID = ##\n    revisionID = ##\n    contentModel = ##\n    "
-                  f"contentFormat = ##\n[END_PAGE_INFO] --%>\n\n#REDIRECT [[{target}]]\n[[Category:Redirect "
-                  f"Pages]]")
-
-    write_file(file_write_path, file_write)
-
-
-def ls_blessing_scan_targets(type_id):
-    valid_list = []
-
-    with open(f'{CONFIG.EXCEL_PATH}/BlessingScanExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        blessingscanexcel = json.load(file)
-
-    with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        monsterexcel = json.load(file)
-
-    with open(f'{CONFIG.EXCEL_PATH}/GadgetExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        gadgetexcel = json.load(file)
-
-    with open(f'{CONFIG.EXCEL_PATH}/AnimalDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        animaldescribeexcel = json.load(file)
-
-    for item in blessingscanexcel:
-        if item['TypeId'] != type_id:
-            continue
-
-        ref_id = item['RefId']
-
-        if item['ScanType'] == 'BLESSING_SCAN_TYPE_MONSTER':
-            for monster in monsterexcel:
-                try:
-                    if monster['DescribeId'] == ref_id:
-                        try:
-                            valid_list.append(monster['DescribeName'])
-                        except KeyError:
-                            try:
-                                for animal in animaldescribeexcel:
-                                    if animal['Id'] == ref_id:
-                                        valid_list.append(animal['NameTextMapHash'])
-                            except KeyError:
-                                if isinstance(monster['NameTextMapHash'], str):
-                                    valid_list.append(monster['NameTextMapHash'])
-                                else:
-                                    valid_list.append(monster['MonsterName'])
-                except KeyError:
-                    continue
-
-        elif item['ScanType'] == 'BLESSING_SCAN_TYPE_GATHER':
-            for gadget in gadgetexcel:
-                if gadget['Id'] == ref_id:
-                    valid_list.append(gadget['InteractNameTextMapHash'])
-
-    return valid_list
-
-
-def parse_blessing_scan():
-    with open(f'{CONFIG.EXCEL_PATH}/BlessingScanTypeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        blessingscantypeexcel = json.load(file)
-
-    output = ""
-
-    for item in blessingscantypeexcel:
-        name = item['TypeNameTextMapHash']
-        type_id = item['TypeId']
-        valid_list = list(set(ls_blessing_scan_targets(type_id)))
-
-        list_text = ''
-        for list_item in valid_list:
-            list_text = list_text + f'{list_item}\n'
-
-        output = output + f'=={name}==\n{list_text}\n'
-
-    print(output)
         
 
 def parse_charasc():
@@ -754,9 +656,7 @@ Balachko%%%Fatui Pyro Agent"""
 
 
 if args.blessingscan:
-    parse_blessing_scan()
-
-if args.tcgicon:
+    from utils.blessingscan import parse_blessing_scan
     parse_blessing_scan()
 
 if args.newenemies:
