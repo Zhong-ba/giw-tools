@@ -48,6 +48,7 @@ repl_langs = ["CHS", "CHT", "ZHS", "ZHT", "DE", "EN", "ES", "FR", "ID", "JA", "J
 repl_langs = ["EN"]
 merge_langs = {
     "TH": ["TH_0", "TH_1"],
+    "RU": ["RU_0", "RU_1"],
 }
 
 for lang, files in merge_langs.items():

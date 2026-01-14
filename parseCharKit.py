@@ -50,10 +50,12 @@ LINK_KEYWORDS = [
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=int)
-parser.add_argument('--ver', type=float)
+parser.add_argument('--ver', type=str)
 parser.add_argument('--files', type=bool)
 parser.add_argument('--elem', type=str)
 parser.add_argument('--natlan', type=bool)
+parser.add_argument('--nodkrai', type=bool)
+parser.add_argument('--hexerei', type=bool)
 parser.add_argument('--traveler', type=int)
 parser.add_argument('--skilldepot', type=int)
 
@@ -85,7 +87,7 @@ with open(f'{CONFIG.EXCEL_PATH}/HyperLinkNameExcelConifgData.json', 'r', encodin
     
 
 char_id = extract_last_digits(str(args.id))
-ver = str(args.ver)
+ver = args.ver
 files = args.files
 bg_element = args.elem
 
@@ -102,7 +104,13 @@ passive_list = [
 if args.natlan:
     passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'NRG', "Night Realm's Gift Passive"])
     passive_list.append([lambda depot: depot['InherentProudSkillOpens'][4]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
-elif not args.traveler:
+if args.nodkrai:
+    passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'MB', 'Moonsign Benediction Passive'])
+    passive_list.append([lambda depot: depot['InherentProudSkillOpens'][4]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
+if args.hexerei:
+    passive_list.append([lambda depot: depot['LLALJAIDKPI'][0]['ProudSkillGroupId'], 'WER', "Witch's Eve Rite Passive"])
+    passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
+elif not args.traveler and not args.natlan and not args.nodkrai and not args.hexerei:
     passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
     
 cons_list = [['1', 'C1'], ['2', 'C2'], ['3', 'C3'], ['4', 'C4'], ['5', 'C5'], ['6', 'C6']]
@@ -195,7 +203,7 @@ def parse_skill(id, ver, type = None, ability_dict = None):
     
     for block in skillexcel:
         if block['Id'] == id:
-            name = block['NameTextMapHash']
+            talentname = block['NameTextMapHash']
             
             if not type:
                 if id % 10 == 1:
@@ -209,7 +217,7 @@ def parse_skill(id, ver, type = None, ability_dict = None):
                 icon = block['SkillIcon']
                 if type == 'Elemental Burst':
                     icon = icon + '_HD'
-                processIcon(icon, 'Talent', f'Talent {name}', f'{character} Talent Icons')
+                processIcon(icon, 'Talent', f'Talent {talentname}', f'{character} Talent Icons')
             
             try:
                 energyCost = block['CostElemVal']
@@ -230,7 +238,7 @@ def parse_skill(id, ver, type = None, ability_dict = None):
             else:
                 flavortxt_wikitext = ''
             
-            ol_text = gen_ol(name)
+            ol_text = gen_ol(talentname)
             vo_text = '==Voice-Overs==\n{{Talent VO}}\n\n'
                 
             for checktype, ability in ability_dict.items():
@@ -268,9 +276,9 @@ def parse_skill(id, ver, type = None, ability_dict = None):
             passive_effect_wikitext = f'{passive_effect_wikitext}\n'
             cons_effects_wikitext = f'{cons_effects_wikitext}\n'
             
-    page_content = f"""{pageinfo(name)}
+    page_content = f"""{pageinfo(talentname)}
 {{{{Talent Infobox
-|image         = Talent {name}.png
+|image         = Talent {talentname}.png
 |character     = {character}
 |type          = {type}
 |info          = {desc}
@@ -282,7 +290,7 @@ def parse_skill(id, ver, type = None, ability_dict = None):
 |utility2      = 
 |arkhe         = 
 }}}}{flavortxt_wikitext}
-'''{name}''' is [[{character}]]'s [[{type}]].
+'''{talentname}''' is [[{character}]]'s [[{type}]].
 
 ==Gameplay Notes==
 {passive_effect_wikitext}{cons_effects_wikitext}==Advanced Properties==
@@ -290,7 +298,7 @@ def parse_skill(id, ver, type = None, ability_dict = None):
 
 ==Preview==
 {{{{Preview
-|file1 = {name} Preview
+|file1 = {talentname} Preview
 }}}}
 
 ==Attribute Scaling==
@@ -331,6 +339,10 @@ def parse_passive(id, ver, type = None, ability_dict = None):
                 except KeyError:
                     if args.natlan and "Night Realm's Gift" in name:
                         type = "Night Realm's Gift Passive"
+                    if args.nodkrai and "Moonsign Benediction" in name:
+                        type = "Moonsign Benediction Passive"
+                    if args.hexerei and "Witch's Eve Rite" in name:
+                        type = "Witch's Eve Rite Passive"
                     else:
                         type = 'Utility Passive'
             
@@ -338,6 +350,10 @@ def parse_passive(id, ver, type = None, ability_dict = None):
             
             if type == "Night Realm's Gift Passive":
                 name = name[20:]
+            if type == "Moonsign Benediction Passive":
+                name = name[22:]
+            if type == "Witch's Eve Rite Passive":
+                name = name[19:]
              
             if files:
                 icon = block['Icon']

@@ -97,6 +97,7 @@ PARTICLE_IDS = {
 def parse_enemy_particles(in_dict: dict):
     hpdrops_parsed = []
     hpdrops = in_dict.get('HpDrops')
+    
     for hpdrop in hpdrops:
         if not hpdrop.get('DropId'):
             continue

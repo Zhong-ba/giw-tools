@@ -10,7 +10,7 @@ def file_redirect(source, target):
     if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Redirects'):
         os.makedirs(f'{CONFIG.OUTPUT_PATH}/Redirects')
 
-    file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{source}.wikitext'
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/Redirects/{target}.wikitext'
     file_write = f"{pageinfo('File:' + source)}\n#REDIRECT [[File:{target}]]\n[[Category:Redirect Pages]]"
 
     write_file(file_write_path, file_write)

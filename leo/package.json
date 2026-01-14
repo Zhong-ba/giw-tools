@@ -1,0 +1,16 @@
+{
+  "name": "leo",
+  "version": "1.0.0",
+  "description": "Genshin Data Parsing",
+  "main": "excelMap.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Leo Chan",
+  "license": "ISC",
+  "dependencies": {
+    "argparse": "^2.0.1",
+    "cli-progress": "^3.9.0",
+    "json-stringify-pretty-compact": "^3.0.0"
+  }
+}
