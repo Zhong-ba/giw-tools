@@ -144,6 +144,7 @@ curve_dict = {
     'GROW_CURVE_HP_2': 2,
     'GROW_CURVE_ACTIVITY_HP_1': 'activity1',
     'GROW_CURVE_ACTIVITY_ATTACK_1': 'activity1',
+    'GROW_CURVE_HP_LITTLEMONSTER': 'wildlife',
 }
 
 

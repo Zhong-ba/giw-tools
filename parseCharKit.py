@@ -56,6 +56,7 @@ parser.add_argument('--elem', type=str)
 parser.add_argument('--natlan', type=bool)
 parser.add_argument('--nodkrai', type=bool)
 parser.add_argument('--hexerei', type=bool)
+parser.add_argument('--stellar', type=bool)
 parser.add_argument('--traveler', type=int)
 parser.add_argument('--skilldepot', type=int)
 
@@ -110,6 +111,9 @@ if args.nodkrai:
 if args.hexerei:
     passive_list.append([lambda depot: depot['LLALJAIDKPI'][0]['ProudSkillGroupId'], 'WER', "Witch's Eve Rite Passive"])
     passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
+if args.stellar:
+    passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'SP', 'Passive'])
+    passive_list.append([lambda depot: depot['InherentProudSkillOpens'][4]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
 elif not args.traveler and not args.natlan and not args.nodkrai and not args.hexerei:
     passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
     
@@ -232,11 +236,16 @@ def parse_skill(id, ver, type = None, ability_dict = None):
             desc = block['DescTextMapHash']
             
             extradesc = block.get('ExtraDescTextMapHash')
+            flavortxt_wikitext = ''
             
             if isinstance(extradesc, str):
                 flavortxt_wikitext = f'\n{{{{Description|{extradesc[11:-4]}}}}}'
             else:
-                flavortxt_wikitext = ''
+                parts = desc.split('<br><br><i>', 1)
+                if len(parts) > 1:
+                    desc = parts[0]
+                    extradesc = parts[1].split('</i>', 1)[0]
+                    flavortxt_wikitext = f'\n{{{{Description|{extradesc}}}}}'
             
             ol_text = gen_ol(talentname)
             vo_text = '==Voice-Overs==\n{{Talent VO}}\n\n'

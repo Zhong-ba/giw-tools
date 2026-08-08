@@ -24,9 +24,18 @@ def parse_cooking_qte():
         out[name]['center'] = float(qteparams[0])
         out[name]['width'] = float(qteparams[1])
         
-    file_write_path = f'{CONFIG.OUTPUT_PATH}/Recipe_Output.lua'
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/Manual_Cooking_data.lua'
     
-    write_file(file_write_path, f'return {dict_to_table(out)}')
+    write_file(file_write_path, f'''--[=[<%-- [PAGE_INFO]
+    comment = #Please do not remove this struct. It's record contains some important information of edit. This struct will be removed automatically after you push edits.#
+    pageTitle = #Module:Manual Cooking/data#
+    pageID = ##
+    revisionID = ##
+    contentModel = ##
+    contentFormat = ##
+[END_PAGE_INFO] --%>--]=]
+
+return {dict_to_table(out)}''')
 
 
 def cooking_qte_image_gen(center, length):
@@ -107,6 +116,6 @@ def cooking_qte_2():
     if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Cooking_QTE'):
         os.makedirs(f'{CONFIG.OUTPUT_PATH}/Cooking_QTE')
     
-    for center in [0.3, 0.38, 0.4, 0.45, 0.48, 0.5, 0.52, 0.55, 0.6, 0.63, 0.65, 0.7, 0.72, 0.77, 0.8, 0.85]:
+    for center in [0.3, 0.38, 0.4, 0.45, 0.47, 0.48, 0.5, 0.52, 0.55, 0.6, 0.63, 0.65, 0.7, 0.72, 0.77, 0.8, 0.85]:
         for length in [0.17, 0.22, 0.27, 0.35, 0.4]:
             cooking_qte_image_gen(center, length)

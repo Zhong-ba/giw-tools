@@ -47,8 +47,25 @@ def merge_jsons(file1, file2, output_file):
 repl_langs = ["CHS", "CHT", "ZHS", "ZHT", "DE", "EN", "ES", "FR", "ID", "JA", "JP", "KO", "KR", "PT", "RU", "TH", "VI", "TR", "IT"]
 repl_langs = ["EN"]
 merge_langs = {
-    "TH": ["TH_0", "TH_1"],
-    "RU": ["RU_0", "RU_1"],
+    "CHS": ["CHS", "_MediumCHS"],
+    "CHT": ["CHT", "_MediumCHT"],
+    "DE": ["DE", "_MediumDE"],
+    "EN": ["EN", "_MediumEN"],
+    "ES": ["ES", "_MediumES"],
+    "FR": ["FR", "_MediumFR"],
+    "ID": ["ID", "_MediumID"],
+    "IT": ["IT", "_MediumIT"],
+    "JP": ["JP", "_MediumJP"],
+    "KR": ["KR", "_MediumKR"],
+    "PT": ["PT", "_MediumPT"],
+    "RU_Temp1": ["RU_0", "RU_1"],
+    "RU_Temp2": ["RU_Temp1", "_MediumRU_0"],
+    "RU": ["RU_Temp2", "_MediumRU_1"],
+    "TH_Temp1": ["TH_0", "TH_1"],
+    "TH_Temp2": ["TH_Temp1", "_MediumTH_0"],
+    "TH": ["TH_Temp2", "_MediumTH_1"],
+    "TR": ["TR", "_MediumTR"],
+    "VI": ["VI", "_MediumVI"],    
 }
 
 for lang, files in merge_langs.items():
