@@ -92,19 +92,26 @@ PARTICLE_IDS = {
     22013900: ['Cryo', 1.3333, 0],
     22014000: ['Geo', 1.3333, 0],
 }
+key_remap = {
+    "HpDrops": "HpDrops",
+    "DropId": "DropId",
+    "HpPercent": "HpPercent",
+    "KillDropId": "KillDropId",
+}
+key_remap_updated = False
 
 
 def parse_enemy_particles(in_dict: dict):
     hpdrops_parsed = []
-    hpdrops = in_dict.get('HpDrops')
+    hpdrops = in_dict.get(key_remap['HpDrops'])
     
     for hpdrop in hpdrops:
-        if not hpdrop.get('DropId'):
+        if not hpdrop.get(key_remap['DropId']):
             continue
         
-        hpdrops_parsed.append([hpdrop.get('DropId'), hpdrop.get('HpPercent')])
+        hpdrops_parsed.append([hpdrop.get(key_remap['DropId']), hpdrop.get(key_remap['HpPercent'])])
         
-    hpdrops_parsed.append([in_dict.get('KillDropId'), 0])
+    hpdrops_parsed.append([in_dict.get(key_remap['KillDropId']), 0])
     
     out = '''{{Energy Drops
 |type  = '''
@@ -112,6 +119,8 @@ def parse_enemy_particles(in_dict: dict):
 
     for hpdrop in hpdrops_parsed:
         particles = PARTICLE_IDS.get(hpdrop[0])
+        if not particles:
+            continue
         
         if i == 1:
             try:
@@ -217,8 +226,7 @@ def parse_enemy_stats_3(in_dict: dict):
 
 
 def find_similar_file(directory, target_name, max_distance = 3):
-    closest_file = None
-    min_distance = max_distance + 1  # Start with a distance larger than max_distance
+    candidate_files = []
     
     for filename in os.listdir(directory):
         if filename.endswith('.json'):
@@ -226,38 +234,111 @@ def find_similar_file(directory, target_name, max_distance = 3):
             distance = Levenshtein.distance(target_name, filename[:-5])
             
             # Check if the distance is within the allowed range
-            if distance <= max_distance and distance < min_distance:
-                min_distance = distance
-                closest_file = filename
+            if distance <= max_distance:
+                candidate_files.append((distance, filename))
 
-    if closest_file:
-        file_path = os.path.join(directory, closest_file)
-        with open(file_path, 'r') as file:
-            data = json.load(file)
-        return data, closest_file
+    for _, candidate_file in sorted(candidate_files, key = lambda item: item[0]):
+        file_path = os.path.join(directory, candidate_file)
+        try:
+            with open(file_path, 'r', encoding = 'utf-8') as file:
+                data = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            continue
+        return data, candidate_file
     
     return None, None
+
+
+def find_monster_config_by_id(directory, monster_id):
+    if monster_id is None:
+        return None, None
+
+    monster_id_str = str(monster_id)
+
+    for filename in os.listdir(directory):
+        if not filename.endswith('.json'):
+            continue
+
+        if filename == f'{monster_id_str}.json' or filename.endswith(f'_{monster_id_str}.json'):
+            file_path = os.path.join(directory, filename)
+            try:
+                with open(file_path, 'r', encoding = 'utf-8') as file:
+                    data = json.load(file)
+            except (OSError, json.JSONDecodeError):
+                return None, None
+
+            return data, filename
+
+    return None, None
+
+
+def resolve_monster_config(directory, monster_id, config_startswith, internal_name):
+    candidates = [
+        find_monster_config_by_id(directory, monster_id),
+        find_similar_file(directory, config_startswith),
+        find_similar_file(directory, f'ConfigMonster_{internal_name}'),
+    ]
+
+    first_found_config = None
+    first_found_name = None
+
+    for config, config_name in candidates:
+        if not config:
+            continue
+
+        if first_found_config is None:
+            first_found_config = config
+            first_found_name = config_name
+
+        if get_monster_config_property(config):
+            return config, config_name
+
+    return first_found_config, first_found_name
+
+
+def get_monster_config_property(config: dict | None):
+    if not config:
+        return None
+
+    combat = config.get('combat')
+    if not isinstance(combat, dict):
+        return None
+
+    property_dict = combat.get('property')
+    if not isinstance(property_dict, dict):
+        return None
+
+    return property_dict
 
 
 def parse_enemy_stats_weight(in_dict: dict):
     name = in_dict.get('DescribeName')
     internal_name = in_dict.get('MonsterName')
+    monster_id = in_dict.get('Id')
     
     config_hash = in_dict.get('CombatConfigHash')
     config_startswith = hex(config_hash)[8:16]
     
-    config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', config_startswith)
+    config, config_name = resolve_monster_config(
+        f'{CONFIG.BIN_PATH}/Monster',
+        monster_id,
+        config_startswith,
+        internal_name,
+    )
     
-    if not config:
-        config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', f'ConfigMonster_{internal_name}')
-    
+    property_dict = get_monster_config_property(config)
     weight = None
-    if config:
-        weight = config['combat']['property']['weight']
+    if property_dict:
+        weight = property_dict.get('weight')
+        if not weight:
+            weight = property_dict.get('bonusRange')
     
     if weight:
         out = f'''|-
 | {{{{Enemy|{name}|20}}}} || {int(weight)}'''
+    elif config_name:
+        out = f'''|-
+| {{{{Enemy|{name}|20}}}} || Unsupported Config: {config_name[:-5]}'''
     else:
         out = f'''|-
 | {{{{Enemy|{name}|20}}}} || Not Found: {config_startswith}, {internal_name}'''
@@ -278,22 +359,29 @@ def parse_enemy_stats_enduretype(in_dict: dict):
     
     name = in_dict.get('DescribeName')
     internal_name = in_dict.get('MonsterName')
+    monster_id = in_dict.get('Id')
     
     config_hash = in_dict.get('CombatConfigHash')
     config_startswith = hex(config_hash)[8:16]
     
-    config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', config_startswith)
+    config, config_name = resolve_monster_config(
+        f'{CONFIG.BIN_PATH}/Monster',
+        monster_id,
+        config_startswith,
+        internal_name,
+    )
     
-    if not config:
-        config, _ = find_similar_file(f'{CONFIG.BIN_PATH}/Monster', f'ConfigMonster_{internal_name}')
-    
+    property_dict = get_monster_config_property(config)
     et = None
-    if config:
-        et = enduretype_dict[config['combat']['property']['endureType']]
+    if property_dict:
+        et = enduretype_dict.get(property_dict.get('endureType'))
     
     if et:
         out = f'''|-
 | {{{{Enemy|{name}|20}}}} || {et}'''
+    elif config_name:
+        out = f'''|-
+| {{{{Enemy|{name}|20}}}} || Unsupported Config: {config_name[:-5]}'''
     else:
         out = f'''|-
 | {{{{Enemy|{name}|20}}}} || Not Found: {config_startswith}, {internal_name}'''
@@ -301,7 +389,43 @@ def parse_enemy_stats_enduretype(in_dict: dict):
     return out
 
 
-def parse_new_enemies(args, gen_ol):    
+def update_key_remap(in_dict: dict):
+    global key_remap
+    global key_remap_updated
+    target_values = {
+        "HpPercent": 60,
+        "DropId": 22010010,
+    }
+    top_level_target_values = {
+        "KillDropId": 22010010,
+    }
+
+    for current_key, current_value in in_dict.items():
+        for target_name, target_value in top_level_target_values.items():
+            if current_value == target_value:
+                key_remap[target_name] = current_key
+                key_remap_updated = True
+    
+    for top_key, items, in in_dict.items():
+        if not isinstance(items, list):
+            continue
+        
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            
+            for target_name, target_value in target_values.items():
+                for current_key, current_value in item.items():
+                    if current_value == target_value:
+                        key_remap[target_name] = current_key
+                        
+                        key_remap["HpDrops"] = top_key
+                        
+                        key_remap_updated = True
+                        break
+
+
+def parse_new_enemies(args, gen_ol):
     if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Enemies'):
             os.makedirs(f'{CONFIG.OUTPUT_PATH}/Enemies')
     
@@ -316,6 +440,10 @@ def parse_new_enemies(args, gen_ol):
         
     with open(f'{CONFIG.EXCEL_PATH}/AnimalCodexExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         codexexcel = {item['Id']: item for item in json.load(file)}
+        
+    # update key remap
+    if not key_remap_updated:
+        update_key_remap(monsterexcel[0])
         
     # build list of old enemies
     old_ids = []
@@ -334,7 +462,7 @@ def parse_new_enemies(args, gen_ol):
         if not name or isinstance(name, int):
             continue
         
-        print(f'====={name}=====')
+        print(f'====={mons_id}: {name}=====')
         
         particles = parse_enemy_particles(item)
         
@@ -481,7 +609,7 @@ def parse_new_enemies_2():
         atk = parse_enemy_stats_3(item)
         file_write = file_write + '\n' + atk
         
-    """file_write = file_write + '\n\n<!-------------- Weight --------------->'
+    file_write = file_write + '\n\n<!-------------- Weight --------------->'
     
     for item in monsterexcel:
         mons_id = item.get('Id')
@@ -511,6 +639,6 @@ def parse_new_enemies_2():
         
         et = parse_enemy_stats_enduretype(item)
         
-        file_write = file_write + '\n' + et"""
+        file_write = file_write + '\n' + et
         
     write_file(file_write_path, file_write)

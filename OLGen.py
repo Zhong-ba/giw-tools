@@ -120,13 +120,15 @@ def gen_ol(text, input_lang = 'EN', tl = True, rm = True):
     if textid == 0:
         return 'Not found.'
 
-    output = f'{{{{Other Languages\n|en       = {remove_keywords(data["EN"][textid])}'
+    en_text = data['EN'].get(textid, text)
+    output = f'{{{{Other Languages\n|en       = {remove_keywords(en_text)}'
 
     for lang, key in OUTORDER.items():
-        tx = f'|{lang}'.ljust(10) + f'= {remove_keywords(data[key][textid])}'
+        localized_text = data[key].get(textid, en_text)
+        tx = f'|{lang}'.ljust(10) + f'= {remove_keywords(localized_text)}'
         output = f'{output}\n{tx}'
 
-        if data[key][textid] == data['EN'][textid]:
+        if localized_text == en_text:
             continue  # skip rm and tl if identical to en
 
         if rm and (lang in ['zhs', 'zht', 'ja', 'ko', 'th']):
