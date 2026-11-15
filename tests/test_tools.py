@@ -706,7 +706,7 @@ class ToolTests(unittest.TestCase):
             'original': 'Override',
             'description': r'Line\n<color=#FF9999FF>Hot</color><color=#3399CCFF>Buzz</color>',
         })
-        runpy.run_path(str(ROOT / 'textMapCleanup.py'))
+        runpy.run_path(str(ROOT / 'textmapcleanup.py'))
         self.assertEqual(json.loads((textmaps / 'TextMapEN.json').read_text(encoding='utf-8')), {
             'original': 'Override',
             'description': 'Line<br>{{Color|Hot}}{{Color|buzz|Buzz}}',
@@ -727,7 +727,7 @@ class ToolTests(unittest.TestCase):
         self.write_json(textmaps / 'TextMapTH_2.json', {'2': 'part2', '3': 'part2'})
         self.write_json(textmaps / 'TextMap_MediumTH.json', {'3': 'medium'})
         self.write_json(textmaps / 'TextMapTH_Temp1.json', {'4': 'stale leftover'})
-        runpy.run_path(str(ROOT / 'textMapCleanup.py'))
+        runpy.run_path(str(ROOT / 'textmapcleanup.py'))
         self.assertEqual(json.loads((textmaps / 'TextMapRU.json').read_text()), {'1': 'main', '2': 'medium'})
         self.assertEqual(json.loads((textmaps / 'TextMapTH.json').read_text()), {'1': 'part1', '2': 'part2', '3': 'medium'})
 

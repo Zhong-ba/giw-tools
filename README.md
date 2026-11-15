@@ -87,7 +87,7 @@ How the sources differ (and how the tools handle it):
   (GuraFoundation also writes default values), so they keep their scrambled
   names. A learned name never replaces a field that already exists.
 - **TextMaps:** files are split differently (RU and TH parts, Medium maps).
-  `textMapCleanup.py` merges whatever parts a language has.
+  `textmapcleanup.py` merges whatever parts a language has.
 - **Field names:** builds scramble different fields, and some readable names
   differ (`specialProudSkillOpens`, `ID`, snake_case voice fields, text fields
   without the `TextMapHash` suffix). The mapper renames known variants using

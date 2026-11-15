@@ -33,7 +33,7 @@ BINOUTPUT_LAYOUT = 4
 READABLE_SOURCE = 'dimbreath'
 # Only the Excel aliases in SCHEMA affect preparation; they are fingerprinted separately.
 PIPELINE_FILES = (
-    ROOT / 'setupData.py', ROOT / 'textMapCleanup.py',
+    ROOT / 'setupData.py', ROOT / 'textmapcleanup.py',
     ROOT / 'leo' / 'ExcelMapEN.js', ROOT / 'leo' / 'config.js', ROOT / 'leo' / 'normalize.js',
 )
 
@@ -139,7 +139,7 @@ def preprocess(config):
         path.write_text(json.dumps(child_config), encoding='utf-8')
         environment = dict(os.environ, GENSHIN_TOOLS_CONFIG=str(path))
         print('Merging TextMaps and cleaning English text...', flush=True)
-        run([sys.executable, str(ROOT / 'textMapCleanup.py')], cwd=ROOT, env=environment)
+        run([sys.executable, str(ROOT / 'textmapcleanup.py')], cwd=ROOT, env=environment)
         print('Mapping English Excel tables...', flush=True)
         run(['node', str(ROOT / 'leo' / 'ExcelMapEN.js')], cwd=ROOT, env=environment)
     validate_outputs(dataset)
