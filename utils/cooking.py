@@ -17,12 +17,13 @@ def parse_cooking_qte():
     
     out = {}
     
-    for key, recipe in recipeexcel.items():
+    for recipe in recipeexcel.values():
         name = recipe.get('NameTextMapHash')
         qteparams = recipe.get('QteParam').split(',')
-        out[name] = {}
-        out[name]['center'] = float(qteparams[0])
-        out[name]['width'] = float(qteparams[1])
+        out[name] = {
+            'center': float(qteparams[0]),
+            'width': float(qteparams[1]),
+        }
         
     file_write_path = f'{CONFIG.OUTPUT_PATH}/Manual_Cooking_data.lua'
     
@@ -44,7 +45,6 @@ def cooking_qte_image_gen(center, length):
     SIZE = 1240
     SCALE = 8  # Scale factor for anti-aliasing
     SCALED_SIZE = SIZE * SCALE
-    THICKNESS = int(1 * SCALED_SIZE * 0.5) 
     INNER_THICKNESS = int((1 - 0.04066555965) * SCALED_SIZE * 0.5)
     
     Q1 = clamp(78 * (center - length / 2), 0, 78)
@@ -65,13 +65,6 @@ def cooking_qte_image_gen(center, length):
     draw.pieslice([0, 0, SCALED_SIZE, SCALED_SIZE], 231 + Q2, 231 + Q3, fill=COLOR2)
     draw.pieslice([0, 0, SCALED_SIZE, SCALED_SIZE], 231 + Q3, 231 + Q4, fill=COLOR1)
     draw.pieslice([0, 0, SCALED_SIZE, SCALED_SIZE], 231 + Q4, 309, fill=TRANSPARENT)
-    
-    # Cut out center
-    mask = Image.new('L', (SCALED_SIZE, SCALED_SIZE), 0)
-    mask_draw = ImageDraw.Draw(mask)
-    mask_draw.ellipse([SCALED_SIZE//2 - THICKNESS, SCALED_SIZE//2 - THICKNESS, SCALED_SIZE//2 + THICKNESS, SCALED_SIZE//2 + THICKNESS], fill=255)
-    mask_draw.ellipse([SCALED_SIZE//2 - INNER_THICKNESS, SCALED_SIZE//2 - INNER_THICKNESS, SCALED_SIZE//2 + INNER_THICKNESS, SCALED_SIZE//2 + INNER_THICKNESS], fill=0)
-    base_image.putalpha(mask)
     
     # Mask to yellow section only
     mask2 = Image.new('L', (SCALED_SIZE, SCALED_SIZE), 0)

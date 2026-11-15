@@ -1,0 +1,110 @@
+import argparse
+from contextlib import redirect_stderr, redirect_stdout
+import gc
+import importlib
+import json
+import os
+from pathlib import Path
+import sys
+import traceback
+from types import ModuleType
+
+from dataSource import ROOT
+
+# Modules that survive between jobs in the resident worker. Everything else imported from
+# this repository is re-imported per job, because legacy modules read the config at import.
+PERSISTENT = {'OLGen', 'dataSource'}
+
+
+def setup(directory: Path) -> None:
+    with (directory / 'request.json').open(encoding='utf-8') as file:
+        request = json.load(file)
+    from setupData import prepare
+    dataset = prepare(Path(request['config_path']))
+    (directory / 'output' / 'dataset.json').write_text(
+        json.dumps({'dataset': str(dataset), 'status': 'ready'}, indent=2), encoding='utf-8',
+    )
+    print('Job completed successfully.', flush=True)
+
+
+def _purge_job_modules() -> None:
+    root = ROOT.resolve()
+    for name, module in list(sys.modules.items()):
+        if name in PERSISTENT or name == 'webui' or name.startswith('webui.'):
+            continue
+        path = getattr(module, '__file__', None)
+        if path and Path(path).resolve().is_relative_to(root):
+            del sys.modules[name]
+
+
+def _shared_textmaps(dataset: str) -> ModuleType:
+    """Import OLGen once per dataset and make load_data() load the TextMaps only once."""
+    module = sys.modules.get('OLGen')
+    if module is not None and getattr(module, 'webui_dataset', None) == dataset:
+        return module
+    sys.modules.pop('OLGen', None)
+    gc.collect()
+    module = importlib.import_module('OLGen')
+    original = module.load_data
+    state = {'loaded': False}
+
+    def load_once(progress_callback=None):
+        if state['loaded']:
+            print('Using TextMaps already loaded in this session.', flush=True)
+            return
+        original(progress_callback)
+        state['loaded'] = True
+
+    module.load_data = load_once
+    module.webui_dataset = dataset
+    return module
+
+
+def run_tool(directory: Path) -> None:
+    with (directory / 'request.json').open(encoding='utf-8') as file:
+        request = json.load(file)
+    config = directory / 'config.json'
+    os.environ['GENSHIN_TOOLS_CONFIG'] = str(config)
+    _purge_job_modules()
+    tool = importlib.import_module('webui.tools').TOOLS[request['tool_id']]
+    if tool.requires_dataset:
+        _shared_textmaps(json.loads(config.read_text(encoding='utf-8'))['RepoPath'])
+    argv = sys.argv
+    try:
+        tool.execute(directory / 'output', request['parameters'])
+    finally:
+        sys.argv = argv
+    print('Job completed successfully.', flush=True)
+
+
+def serve(connection) -> None:
+    """Resident worker loop: receives job directories, replies with an error message or None."""
+    os.chdir(ROOT)
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    while True:
+        try:
+            directory = connection.recv()
+        except EOFError:
+            return
+        if directory is None:
+            return
+        error = None
+        with open(Path(directory) / 'log.txt', 'w', encoding='utf-8', buffering=1) as log:
+            with redirect_stdout(log), redirect_stderr(log):
+                try:
+                    run_tool(Path(directory))
+                except SystemExit as exit_request:
+                    if exit_request.code not in (None, 0):
+                        error = f'The tool exited with code {exit_request.code}. Open the log for details.'
+                        traceback.print_exc()
+                except Exception as failure:
+                    error = f'{type(failure).__name__}: {failure}'
+                    traceback.print_exc()
+        connection.send(error)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('directory', type=Path)
+    setup(parser.parse_args().directory.resolve())

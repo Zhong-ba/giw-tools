@@ -3,3 +3,7 @@ leo/cmd.txt
 output/
 archive/
 __pycache__/
+.data/
+.venv/
+frontend/node_modules/
+frontend/dist/

@@ -3,6 +3,7 @@ const { SingleBar } = require("cli-progress");
 const { existsSync, writeFileSync, readdirSync, rmdirSync, mkdirSync } = require("fs");
 const { join } = require("path");
 const stringify = require("json-stringify-pretty-compact");
+const CONFIG = require("./config");
 
 const LANGUAGES = ["EN"];
 const TEXTMAPS = {};
@@ -11,11 +12,11 @@ const TEXTMAPS = {};
  * Options set by command line arguments and defaults.
  */
 const OPTIONS = {
-  output_dir: require("D:/WikiGenshin/0 - Data/tools/scriptconfig.json").RepoPath + "/MappedExcelBinOutput_EN",
-  mapped_dir: require("D:/WikiGenshin/0 - Data/tools/scriptconfig.json").RepoPath + "/MappedToID",
-  textMap_dir: require("D:/WikiGenshin/0 - Data/tools/scriptconfig.json").RepoPath + "/TextMap",
+  output_dir: CONFIG.RepoPath + "/MappedExcelBinOutput_EN",
+  mapped_dir: CONFIG.RepoPath + "/MappedToID",
+  textMap_dir: CONFIG.RepoPath + "/TextMap",
   textmapprefix: "TextMap",
-  excel_dir: require("D:/WikiGenshin/0 - Data/tools/scriptconfig.json").RepoPath + "/ExcelBinOutput",
+  excel_dir: CONFIG.RepoPath + "/ExcelBinOutput",
   files: [],
   idOnly: false,
   clean: false,
@@ -379,7 +380,7 @@ function mapToId() {
 function materialsToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "MaterialExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "MaterialExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "MaterialExcelConfigData.json"));
   Object.values(data).forEach(material => {
@@ -397,7 +398,7 @@ function materialsToId() {
 function rewardsToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "RewardExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "RewardExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let rewards = require(join(OPTIONS.excel_dir, "RewardExcelConfigData.json"));
   rewards.forEach(reward => {
@@ -423,7 +424,7 @@ function rewardsToId() {
 function npcsToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "NpcExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "NpcExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "NpcExcelConfigData.json"));
   Object.values(data).forEach(npc => {
@@ -440,7 +441,7 @@ function npcsToId() {
 function avatarsToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "AvatarExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "AvatarExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "AvatarExcelConfigData.json"));
   Object.values(data).forEach(avatar => {
@@ -458,7 +459,7 @@ function avatarsToId() {
 function furnitureToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "HomeWorldFurnitureExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "HomeWorldFurnitureExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "HomeWorldFurnitureExcelConfigData.json"));
   Object.values(data).forEach(furniture => {
@@ -476,7 +477,7 @@ function furnitureToId() {
 function weaponToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "WeaponExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "WeaponExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "WeaponExcelConfigData.json"));
   Object.values(data).forEach(weapon => {
@@ -494,7 +495,7 @@ function weaponToId() {
 function artifactToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "ReliquaryExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "ReliquaryExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "ReliquaryExcelConfigData.json"));
   Object.values(data).forEach(artifact => {
@@ -512,7 +513,7 @@ function artifactToId() {
 function monsterToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "MonsterExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "MonsterExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "MonsterExcelConfigData.json"));
   Object.values(data).forEach(monster => {
@@ -529,7 +530,7 @@ function monsterToId() {
 function monsterToDescribeId() {
   if (!existsSync(join(OPTIONS.excel_dir, "MonsterDescribeExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "MonsterDescribeExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "MonsterDescribeExcelConfigData.json"));
   Object.values(data).forEach(monster => {
@@ -546,7 +547,7 @@ function monsterToDescribeId() {
 function affixToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "MonsterAffixExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "MonsterAffixExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "MonsterAffixExcelConfigData.json"));
   Object.values(data).forEach(affix => {
@@ -563,7 +564,7 @@ function affixToId() {
 function cardCharToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "GCGCharExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "GCGCharExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "GCGCharExcelConfigData.json"));
   Object.values(data).forEach(card => {
@@ -578,7 +579,7 @@ function cardCharToId() {
 function cardToId() {
   if (!existsSync(join(OPTIONS.excel_dir, "GCGDeckCardExcelConfigData.json"))) {
     console.error(`${join(OPTIONS.excel_dir, "GCGDeckCardExcelConfigData.json")} does not exist.`);
-    return process.exit();
+    return process.exit(1);
   }
   let data = require(join(OPTIONS.excel_dir, "GCGDeckCardExcelConfigData.json"));
   Object.values(data).forEach(card => {

@@ -38,7 +38,7 @@ def parse_fishing_points():
         fishstock = {item['Id']: item for item in json.load(file)}
     
     for id, item in poolexcel.items():
-        if id in list(poolexcel_old.keys()):
+        if id in poolexcel_old:
             print(f'Skipping {id}.')
             continue
         

@@ -1,12 +1,12 @@
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QLabel, QLineEdit, QPushButton, QGridLayout, QWidget, QComboBox, QCheckBox, QProgressBar
 from PyQt5.QtCore import Qt, QEvent
-from tqdm import tqdm
 import sys
 import json
 
-with open('scriptconfig.json', 'r', encoding = 'utf-8') as file:
-    CONFIG_FILE = json.load(file)
+from dataSource import load_config
+
+CONFIG_FILE = load_config()
 
 TEXTMAP_PATH = f'{CONFIG_FILE["RepoPath"]}/TextMap'
 LANGS = ['CHS', 'CHT', 'DE', 'EN', 'ES', 'FR', 'ID', 'JP', 'KR', 'PT', 'RU', 'TH', 'VI', 'TR', 'IT']
@@ -112,8 +112,8 @@ def remove_keywords(in_text):
 def gen_ol(text, input_lang = 'EN', tl = True, rm = True):
     textid = 0
 
-    for item in data[input_lang]:
-        if data[input_lang][item] == text:
+    for item, value in data[input_lang].items():
+        if value == text:
             textid = item
             break
 
@@ -121,29 +121,26 @@ def gen_ol(text, input_lang = 'EN', tl = True, rm = True):
         return 'Not found.'
 
     en_text = data['EN'].get(textid, text)
-    output = f'{{{{Other Languages\n|en       = {remove_keywords(en_text)}'
+    output = [f'{{{{Other Languages\n|en       = {remove_keywords(en_text)}']
 
     for lang, key in OUTORDER.items():
         localized_text = data[key].get(textid, en_text)
         tx = f'|{lang}'.ljust(10) + f'= {remove_keywords(localized_text)}'
-        output = f'{output}\n{tx}'
+        output.append(tx)
 
         if localized_text == en_text:
             continue  # skip rm and tl if identical to en
 
         if rm and (lang in ['zhs', 'zht', 'ja', 'ko', 'th']):
-            rm = f'|{lang}_rm'.ljust(10) + '= '
-            output = f'{output}\n{rm}'
+            output.append(f'|{lang}_rm'.ljust(10) + '= ')
 
         if tl and lang != 'zhs':
             if lang == 'zht':
                 lang = 'zh'
-            tl = f'|{lang}_tl'.ljust(10) + '= '
-            output = f'{output}\n{tl}'
+            output.append(f'|{lang}_tl'.ljust(10) + '= ')
 
-    output = f'{output}\n}}}}'
-
-    return output
+    output.append('}}')
+    return '\n'.join(output)
 
 
 class LoadingWindow(QWidget):

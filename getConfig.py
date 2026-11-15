@@ -1,4 +1,4 @@
-import json
+from dataSource import load_config
 
 CONFIG = None
 
@@ -13,6 +13,5 @@ class Config:
         self.OUTPUT_PATH = file["OutputPath"]
     
     
-with open('scriptconfig.json', 'r', encoding = 'utf-8') as file:
-    CONFIG_FILE = json.load(file)
-    CONFIG = Config(CONFIG_FILE)
+CONFIG_FILE = load_config()
+CONFIG = Config(CONFIG_FILE)

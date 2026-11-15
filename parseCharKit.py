@@ -117,7 +117,6 @@ if args.stellar:
 elif not args.traveler and not args.natlan and not args.nodkrai and not args.hexerei:
     passive_list.append([lambda depot: depot['InherentProudSkillOpens'][2]['ProudSkillGroupId'], 'UP', 'Utility Passive'])
     
-cons_list = [['1', 'C1'], ['2', 'C2'], ['3', 'C3'], ['4', 'C4'], ['5', 'C5'], ['6', 'C6']]
 cons_list = [
     [lambda depot: depot['Talents'][0], 'C1'],
     [lambda depot: depot['Talents'][1], 'C2'],
@@ -223,12 +222,9 @@ def parse_skill(id, ver, type = None, ability_dict = None):
                     icon = icon + '_HD'
                 processIcon(icon, 'Talent', f'Talent {talentname}', f'{character} Talent Icons')
             
-            try:
-                energyCost = block['CostElemVal']
-            except KeyError:
-                energyCost = ''
+            energyCost = block.get('CostElemVal', '')
                 
-            if block['CdTime']:
+            if block.get('CdTime'):
                 cd = str(block['CdTime']) + 's'
             else:
                 cd = ''
@@ -325,7 +321,7 @@ def parse_skill(id, ver, type = None, ability_dict = None):
 ==Navigation==
 {{{{Talent Navbox|{character}}}}}"""
     
-    return(page_content)
+    return page_content
 
 
 def parse_passive(id, ver, type = None, ability_dict = None):
@@ -403,7 +399,7 @@ def parse_passive(id, ver, type = None, ability_dict = None):
 {{{{Talent Navbox|{character}}}}}
 """
     
-    return(page_content)
+    return page_content
 
 
 def parse_cons(id, ver, ability_dict):
@@ -428,17 +424,17 @@ def parse_cons(id, ver, ability_dict):
             
             if ability_dict['Normal Attack'] in desc:
                 desc = desc.replace(ability_dict['Normal Attack'], f'[[{ability_dict["Normal Attack"]}]]', 1)
-                if rank in [3, 5]:
+                if rank in (3, 5):
                     utility2 = 'Normal Attack Level Increase'
                 
             if ability_dict['Elemental Skill'] in desc:
                 desc = desc.replace(ability_dict['Elemental Skill'], f'[[{ability_dict["Elemental Skill"]}]]', 1)
-                if rank in [3, 5]:
+                if rank in (3, 5):
                     utility2 = 'Elemental Skill Level Increase'
             
             if ability_dict['Elemental Burst'] in desc:
                 desc = desc.replace(ability_dict['Elemental Burst'], f'[[{ability_dict["Elemental Burst"]}]]', 1)
-                if rank in [3, 5]:
+                if rank in (3, 5):
                     utility2 = 'Elemental Burst Level Increase'
                 
             if utility2:
@@ -477,7 +473,7 @@ def parse_cons(id, ver, ability_dict):
 {{{{Talent Navbox|{character}}}}}
 """
     
-    return(page_content)
+    return page_content
 
 
 def get_skill_name(id):
@@ -518,8 +514,7 @@ def get_passive_effects(id, i):
             name = block['NameTextMapHash']
             desc = block['DescTextMapHash']
             
-            affected_abilities = re.findall(r'\{LINK#S(\d+)\}', desc)
-            affected_abilities = list(set(affected_abilities))
+            affected_abilities = set(re.findall(r'\{LINK#S(\d+)\}', desc))
             
             for ability in affected_abilities:
                 if passive_effects.get(ability) is None:
@@ -534,8 +529,7 @@ def get_cons_effects(id, i):
             name = block['NameTextMapHash']
             desc = block['DescTextMapHash']
             
-            affected_abilities = re.findall(r'\{LINK#S(\d+)\}', desc)
-            affected_abilities = list(set(affected_abilities))
+            affected_abilities = set(re.findall(r'\{LINK#S(\d+)\}', desc))
             
             for ability in affected_abilities:
                 if cons_effects.get(ability) is None:
@@ -553,7 +547,7 @@ with open(f'{CONFIG.EXCEL_PATH}/AvatarSkillDepotExcelConfigData.json', 'r', enco
 with open(f'{CONFIG.EXCEL_PATH}/FetterInfoExcelConfigData.json', 'r', encoding='utf-8') as file:
     fetterinfoconfig = json.load(file)
      
-if not char_id == "None":
+if char_id != "None":
     for block in avatarconfig:
         if block['Id'] == args.id:
             character = block['NameTextMapHash']
@@ -572,20 +566,18 @@ if not char_id == "None":
         if block['Id'] == skilldepotid:
             skilldepot: dict = block
 
-    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/{character}/Skills'):
-        os.makedirs(f'{CONFIG.OUTPUT_PATH}/{character}/Skills')
-    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/{character}/Passives'):
-        os.makedirs(f'{CONFIG.OUTPUT_PATH}/{character}/Passives')
-    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/{character}/Constellations'):
-        os.makedirs(f'{CONFIG.OUTPUT_PATH}/{character}/Constellations')
+    for folder in ('Skills', 'Passives', 'Constellations'):
+        output_path = f'{CONFIG.OUTPUT_PATH}/{character}/{folder}'
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
         
-    ability_dict = {}
-    
-    ability_dict['Normal Attack'] = get_skill_name(ability_list[0][0](skilldepot))
-    ability_dict['Elemental Skill'] = get_skill_name(ability_list[1][0](skilldepot))
-    ability_dict['Elemental Burst'] = get_skill_name(ability_list[2][0](skilldepot))
-    ability_dict['1st Ascension Passive'] = get_passive_name(passive_list[0][0](skilldepot))
-    ability_dict['4th Ascension Passive'] = get_passive_name(passive_list[1][0](skilldepot))
+    ability_dict = {
+        'Normal Attack': get_skill_name(ability_list[0][0](skilldepot)),
+        'Elemental Skill': get_skill_name(ability_list[1][0](skilldepot)),
+        'Elemental Burst': get_skill_name(ability_list[2][0](skilldepot)),
+        '1st Ascension Passive': get_passive_name(passive_list[0][0](skilldepot)),
+        '4th Ascension Passive': get_passive_name(passive_list[1][0](skilldepot)),
+    }
     
     for i, passive in enumerate(passive_list):
         if i < 2:

@@ -1,7 +1,6 @@
 import argparse
 import os
 
-from utils.redirect import main_redirect
 import OLGen
 
 from getConfig import CONFIG

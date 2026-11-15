@@ -55,17 +55,14 @@ def parse_blessing_scan():
     with open(f'{CONFIG.EXCEL_PATH}/BlessingScanTypeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         blessingscantypeexcel = json.load(file)
 
-    output = ""
+    output = []
 
     for item in blessingscantypeexcel:
         name = item['TypeNameTextMapHash']
         type_id = item['TypeId']
         valid_list = list(set(ls_blessing_scan_targets(type_id)))
 
-        list_text = ''
-        for list_item in valid_list:
-            list_text = list_text + f'{list_item}\n'
+        list_text = ''.join(f'{list_item}\n' for list_item in valid_list)
+        output.append(f'=={name}==\n{list_text}\n')
 
-        output = output + f'=={name}==\n{list_text}\n'
-
-    print(output)
+    print(''.join(output))

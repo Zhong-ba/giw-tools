@@ -3,6 +3,7 @@ const { SingleBar } = require("cli-progress");
 const { existsSync, writeFileSync, readdirSync, rmdirSync, mkdirSync } = require("fs");
 const { join } = require("path");
 const stringify = require("json-stringify-pretty-compact");
+const CONFIG = require("./config");
 
 const LANGUAGES = ["CHS", "CHT", "ZHS", "ZHT", "DE", "EN", "ES", "FR", "ID", "JA", "JP", "KO", "KR", "PT", "RU", "TH", "VI", "TR", "IT"];
 const TEXTMAPS = {};
@@ -11,11 +12,11 @@ const TEXTMAPS = {};
  * Options set by command line arguments and defaults.
  */
 const OPTIONS = {
-  output_dir: "../../MappedExcelBinOutput_ALL",
-  mapped_dir: "../../MappedToID",
-  textMap_dir: "../../TextMap",
+  output_dir: CONFIG.RepoPath + "/MappedExcelBinOutput_ALL",
+  mapped_dir: CONFIG.RepoPath + "/MappedToID",
+  textMap_dir: CONFIG.RepoPath + "/TextMap",
   textmapprefix: "TextMap",
-  excel_dir: "../../ExcelBinOutput",
+  excel_dir: CONFIG.RepoPath + "/ExcelBinOutput",
   files: [],
   idOnly: false,
   clean: false,

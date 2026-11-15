@@ -446,11 +446,11 @@ def parse_new_enemies(args, gen_ol):
         update_key_remap(monsterexcel[0])
         
     # build list of old enemies
-    old_ids = []
+    old_ids = set()
     for item in monsterexcel_old:
         mons_id = item.get('Id')
         if mons_id:
-            old_ids.append(mons_id)
+            old_ids.add(mons_id)
         
     for item in monsterexcel:
         mons_id = item.get('Id')
@@ -561,7 +561,7 @@ def parse_new_enemies(args, gen_ol):
     
 
 def parse_new_enemies_2():
-    file_write = '<!-------------- HP --------------->'
+    file_write = ['<!-------------- HP --------------->']
     file_write_path = f'{CONFIG.OUTPUT_PATH}/New_Enemies_Output.wikitext'
     
     with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
@@ -571,74 +571,33 @@ def parse_new_enemies_2():
         monsterexcel_old = json.load(file)
         
     # build list of old enemies
-    old_ids = []
-    old_names = []
+    old_ids = set()
+    old_names = set()
     for item in monsterexcel_old:
         mons_id = item.get('Id')
         name = item.get('DescribeName')
         if mons_id:
-            old_ids.append(mons_id)
+            old_ids.add(mons_id)
         if name:
-            old_names.append(name)
+            old_names.add(name)
         
-    for item in monsterexcel:
-        mons_id = item.get('Id')
-        
-        name = item.get('DescribeName')
-        if not name:
-            continue
-        
-        if mons_id in old_ids or name in old_names:
-            continue
-        
-        hp = parse_enemy_stats_2(item)
-        file_write = file_write + '\n' + hp
-        
-    file_write = file_write + '\n\n<!-------------- ATK --------------->'
-    
-    for item in monsterexcel:
-        mons_id = item.get('Id')
-        
-        name = item.get('DescribeName')
-        if not name:
-            continue
-        
-        if mons_id in old_ids or name in old_names:
-            continue
-        
-        atk = parse_enemy_stats_3(item)
-        file_write = file_write + '\n' + atk
-        
-    file_write = file_write + '\n\n<!-------------- Weight --------------->'
-    
-    for item in monsterexcel:
-        mons_id = item.get('Id')
-        
-        name = item.get('DescribeName')
-        if not name:
-            continue
-        
-        if mons_id in old_ids or name in old_names:
-            continue
-        
-        weight = parse_enemy_stats_weight(item)
-        
-        file_write = file_write + '\n' + weight
-        
-    file_write = file_write + '\n\n<!-------------- Endure Type --------------->'
-    
-    for item in monsterexcel:
-        mons_id = item.get('Id')
-        
-        name = item.get('DescribeName')
-        if not name:
-            continue
-        
-        if mons_id in old_ids or name in old_names:
-            continue
-        
-        et = parse_enemy_stats_enduretype(item)
-        
-        file_write = file_write + '\n' + et
-        
-    write_file(file_write_path, file_write)
+    new_enemies = [
+        item for item in monsterexcel
+        if item.get('DescribeName')
+        and item.get('Id') not in old_ids
+        and item.get('DescribeName') not in old_names
+    ]
+
+    sections = (
+        ('HP', parse_enemy_stats_2),
+        ('ATK', parse_enemy_stats_3),
+        ('Weight', parse_enemy_stats_weight),
+        ('Endure Type', parse_enemy_stats_enduretype),
+    )
+    for index, (title, render_stats) in enumerate(sections):
+        if index:
+            file_write.append(f'\n\n<!-------------- {title} --------------->')
+        for item in new_enemies:
+            file_write.append('\n' + render_stats(item))
+
+    write_file(file_write_path, ''.join(file_write))

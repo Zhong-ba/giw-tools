@@ -3,14 +3,15 @@ const { SingleBar } = require("cli-progress");
 const { writeFileSync } = require("fs");
 const { join } = require("path");
 const stringify = require("json-stringify-pretty-compact");
+const CONFIG = require("./config");
 
 /**
  * Options set by command line arguments and defaults.
  */
 const OPTIONS = {
   option: null,
-  input_dir: require("D:/WikiGenshin/0 - Data/tools/scriptconfig.json").RepoPath + "/MappedExcelBinOutput_EN",
-  output_dir: require("D:/WikiGenshin/0 - Data/tools/scriptconfig.json").OutputPath,
+  input_dir: CONFIG.RepoPath + "/MappedExcelBinOutput_EN",
+  output_dir: CONFIG.OutputPath,
   output_file: null,
   print: false,
   questId: null,

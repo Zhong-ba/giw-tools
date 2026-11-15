@@ -1,8 +1,9 @@
 import re
 import json
 
-with open('scriptconfig.json', 'r', encoding = 'utf-8') as file:
-    CONFIG_FILE = json.load(file)
+from dataSource import load_config
+
+CONFIG_FILE = load_config()
     
 
 def replace_text(file_path):
@@ -26,8 +27,10 @@ def replace_text(file_path):
         print(f"Replacements completed and saved to {file_path}")
     except FileNotFoundError:
         print(f"File not found: {file_path}")
+        raise
     except Exception as e:
         print(f"An error occurred: {str(e)}")
+        raise
         
         
 def merge_jsons(file1, file2, output_file):
@@ -44,7 +47,6 @@ def merge_jsons(file1, file2, output_file):
         json.dump(merged_content, file, ensure_ascii = False, indent=2)
         
 
-repl_langs = ["CHS", "CHT", "ZHS", "ZHT", "DE", "EN", "ES", "FR", "ID", "JA", "JP", "KO", "KR", "PT", "RU", "TH", "VI", "TR", "IT"]
 repl_langs = ["EN"]
 merge_langs = {
     "CHS": ["CHS", "_MediumCHS"],
@@ -71,5 +73,5 @@ merge_langs = {
 for lang, files in merge_langs.items():
     merge_jsons(f'{CONFIG_FILE["RepoPath"]}/TextMap/TextMap{files[0]}.json', f'{CONFIG_FILE["RepoPath"]}/TextMap/TextMap{files[1]}.json', f'{CONFIG_FILE["RepoPath"]}/TextMap/TextMap{lang}.json')
 
-for n in range(0, len(repl_langs)):
-    replace_text(f"{CONFIG_FILE['RepoPath']}\TextMap\TextMap" + repl_langs[n] + ".json")
+for lang in repl_langs:
+    replace_text(fr"{CONFIG_FILE['RepoPath']}\TextMap\TextMap{lang}.json")

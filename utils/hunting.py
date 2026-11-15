@@ -32,10 +32,11 @@ def parse_hunting_v2():
         lore_desc = lore_desc.replace(r'{0}', location)
         
         trait = item['TraitTextTextMapHash']
-        print(trait.split('<br />'))
-        strength = trait.split('<br />')[1]
+        trait_parts = trait.split('<br />')
+        print(trait_parts)
+        strength = trait_parts[1]
         strength = re.sub(r'Invulnerability to (.*)? ', r'Immune to {{Color|\1}}', strength)
-        weakness = trait.split('<br />')[4] + "by '''120<nowiki>%</nowiki>'''."
+        weakness = trait_parts[4] + "by '''120<nowiki>%</nowiki>'''."
         weakness = re.sub(r'^(.*)? decreased', r'{{Color|\1}} decreased', weakness)
         
         file_write = file_write + f'''
