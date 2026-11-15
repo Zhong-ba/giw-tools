@@ -566,6 +566,29 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
             raise HTTPException(409, str(error)) from error
         return [item for item in items if added is None or item['id'] in added]
 
+    @application.get('/api/periods/{kind}')
+    def period_list(kind: str, config: dict = Depends(prepared)):
+        '''Spiral Abyss rotations or Stygian Onslaught events of the dataset, newest first.'''
+        from utils.periods import PERIODS
+
+        if kind not in PERIODS:
+            raise HTTPException(404, f'Unknown period list: {kind}')
+        table, listing = PERIODS[kind]
+        try:
+            return listing(mapped_table(config, table))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(409, str(error)) from error
+
+    @application.get('/api/date-versions')
+    def date_version_list(dates: str = Query(min_length=10, max_length=2200, pattern=r'^\d{4}-\d{2}-\d{2}(,\d{4}-\d{2}-\d{2})*$')):
+        '''{date: version} from the wiki's Date to Version, for comma-separated YYYY-MM-DD dates.'''
+        from wikiVersion import date_versions
+
+        try:
+            return date_versions(dates.split(','))
+        except (OSError, ValueError) as error:
+            raise HTTPException(502, f'Could not reach the wiki: {error}') from error
+
     @application.get('/api/jobs', response_model=list[Job])
     def jobs(request: Request):
         return manager(request).list_jobs(client(request))

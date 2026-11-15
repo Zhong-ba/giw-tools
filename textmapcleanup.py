@@ -67,12 +67,24 @@ def textmap_sources(directory, lang):
     return sources
         
 
+def save_highlights(file_path, output_file):
+    '''Keeps the raw text of entries with gold highlights, which replace_text flattens, for tools that render them
+    the way the wiki does ({{Color|help|...}}).'''
+    with open(file_path, 'r', encoding='utf-8') as file:
+        textmap = json.load(file)
+    highlights = {key: value for key, value in textmap.items() if HIGHLIGHT in value}
+    with open(output_file, 'w', encoding='utf-8') as file:
+        json.dump(highlights, file, ensure_ascii=False, indent=2)
+
+
 repl_langs = ["EN"]
 merge_langs = ['CHS', 'CHT', 'DE', 'EN', 'ES', 'FR', 'ID', 'IT', 'JP', 'KR', 'PT', 'RU', 'TH', 'TR', 'VI']
+HIGHLIGHT = '<color=#FFD780FF>'
 
 textmap_dir = Path(CONFIG_FILE['RepoPath']) / 'TextMap'
 for lang in merge_langs:
     merge_jsons(textmap_sources(textmap_dir, lang), textmap_dir / f'TextMap{lang}.json')
 
 for lang in repl_langs:
+    save_highlights(textmap_dir / f'TextMap{lang}.json', textmap_dir / f'TextMap{lang}_Highlights.json')
     replace_text(textmap_dir / f'TextMap{lang}.json')

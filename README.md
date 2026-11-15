@@ -143,7 +143,7 @@ the tool's existing `Levenshtein` dependency to be installed.
 
 ## Web interface
 The first web version includes **Other Languages**, **Character Kit**,
-**Attribute Scaling**, **Character Data**, **Enemy**, **Fishing Point**, **Fish Weights**, **Manual Cooking Data**, **Bounties** and **Redirect Builder**, plus dataset setup/update controls, persistent background
+**Attribute Scaling**, **Character Data**, **Enemy**, **Spiral Abyss**, **Imaginarium Theater**, **Stygian Onslaught**, **Fishing Point**, **Fish Weights**, **Manual Cooking Data**, **Bounties** and **Redirect Builder**, plus dataset setup/update controls, persistent background
 jobs, live logs, text/image previews, individual downloads, and ZIP exports.
 Existing command-line tools remain available.
 
@@ -385,6 +385,49 @@ python -m unittest discover -s tests -v
 npm.cmd --prefix frontend run build
 npm.cmd --prefix frontend run lint
 ```
+
+### Previewing the public site locally
+Before pushing, run `.\previewSite.bat` (options: `--port 8010`, `--nobuild`). It builds the
+frontend and serves it from `python -m webui --hosted` at <http://127.0.0.1:8010>, so the page
+behaves like the deployed site (jobs kept by the browser, the dataset picker, no setup or bot
+server) while running your working copy's tools on this computer's prepared data. Python changes
+need a restart of the preview; frontend changes need a rebuild (or run without `--nobuild`).
+`.\startWebUI.bat` remains the full local workshop.
+
+Pushing to `main` redeploys only the frontend (Vercel). Backend changes (anything outside
+`frontend/`) reach the site after rebuilding the backend container. Changes to `setupData.py`, its
+pipeline files or `BINOUTPUT_PATHS` also need the maintenance command below to re-prepare datasets.
+
+### Spiral Abyss
+**Spiral Abyss** (or `python parseMisc.py --abyss latest --ver 7.3`, or a start date instead of
+`latest`) writes the `Spiral Abyss/Floors/<date>` page in the layout of the current rotation pages:
+the `{{Abyssal Moon Spire}}` header (dates, neighbours and changed floors), Ley Line Disorder per
+floor and half, and each changed floor's `{{Domain Enemies}}` levels, targets and enemies. Newer
+chambers' enemies come from `BinOutput/MonsterPreview` (GuraFoundation names its files after the
+chambers' previews; DimbreathBot's hashed names cannot be matched). The game data has no enemy
+counts, waves or spawn notes, so the page is marked as a stub for editors to complete them.
+
+### Imaginarium Theater
+**Imaginarium Theater** (or `python parseMisc.py --theater latest --ver 7.1`, or a start date) writes the
+`Imaginarium Theater/Seasons/<date>` page: the `{{Imaginarium Theater Season}}` header (season number,
+dates, neighbours, opening characters, blessing, elements, Special Guest Stars and Climactic Showdown bosses
+with levels), then each Act and Arcana Challenge with battle types, stage effects, boss/Arcana descriptions and
+`{{Domain Enemies}}` objectives, Bonus/Star Challenges, levels per mode (e.g. `Easy Mode: 75<br>Hard/Visionary
+Mode: 85`), advantages and enemies (powerful foes as `{ danger = 1 }`, from
+`BinOutput/MonsterPreview/MonsterPreview_RoleCombatLevel.json`). Enemy counts, waves and the main objectives'
+time limits and target counts are not in the client data; they are written as `?` and the page is marked as a
+stub. The order of stages within a battle follows the data and may differ from the wiki.
+
+### Stygian Onslaught
+**Stygian Onslaught** (or `python parseMisc.py --stygian latest --ver 7.2`, or a start date) writes the
+`Stygian Onslaught/<date>` event page: the Event infobox and durations (the wiki's end is 03:59:59 eight
+days before the data's), the battlefield summary table, each difficulty's objective, Ley Line Disturbance and
+opposing lineup (levels, advantages, bullet summaries and mechanics), the enemy descriptions, gallery, total
+rewards and Other Languages. The description and Battle Pass mission are only in the data while the event is
+the newest one. The announcement summary and HoYoLAB link are not in the game data, and wiki enemy page
+names can differ from the in-game names in `{{Card}}`/`{{Enemy}}`, so check those. Gold highlights become
+`{{Color|help|...}}` from `TextMap/TextMapEN_Highlights.json`, which dataset setup saves before cleaning the
+TextMap.
 
 ### Deploying (hosted mode)
 A public site is split in two: a static frontend (e.g. on Vercel) and one shared

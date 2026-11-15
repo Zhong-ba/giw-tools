@@ -120,11 +120,18 @@ def gen_ol(text, input_lang = 'EN', tl = True, rm = True):
     if textid == 0:
         return 'Not found.'
 
-    en_text = data['EN'].get(textid, text)
+    return format_ol({lang: values.get(textid) for lang, values in data.items()}, text, tl, rm)
+
+
+def format_ol(texts, fallback = '', tl = True, rm = True):
+    '''An Other Languages template from {language: text}, e.g. composed from several TextMap entries.'''
+    en_text = texts.get('EN')
+    en_text = fallback if en_text is None else en_text
     output = [f'{{{{Other Languages\n|en       = {remove_keywords(en_text)}']
 
     for lang, key in OUTORDER.items():
-        localized_text = data[key].get(textid, en_text)
+        localized_text = texts.get(key)
+        localized_text = en_text if localized_text is None else localized_text
         tx = f'|{lang}'.ljust(10) + f'= {remove_keywords(localized_text)}'
         output.append(tx)
 

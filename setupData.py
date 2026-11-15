@@ -19,8 +19,9 @@ from dataSource import (
 
 
 SCHEMA = ROOT / 'leo' / 'dataSchema.json'
-# BinOutput files the tools read: monster configs (enemy tool) and character reference files (Character Kit,
-# whose Advanced Properties also need the talent configs that link attacks to talent scaling rows).
+# BinOutput files the tools read: monster configs (enemy tool), character reference files (Character Kit,
+# whose Advanced Properties also need the talent configs that link attacks to talent scaling rows) and the
+# Spiral Abyss chambers' enemy previews.
 BINOUTPUT_PATHS = [
     '/BinOutput/Monster/',
     '/BinOutput/Avatar/ConfigAvatar_*.json',
@@ -28,9 +29,10 @@ BINOUTPUT_PATHS = [
     '/BinOutput/Ability/Temp/AvatarAniEventAbilities/',
     '/BinOutput/Gadget/ConfigGadget_SkillObj_*.json',
     '/BinOutput/Talent/AvatarTalents/',
+    '/BinOutput/MonsterPreview/',
 ]
 # Bump when BINOUTPUT_PATHS or BinOutput preparation changes so prepared snapshots are refreshed.
-BINOUTPUT_LAYOUT = 4
+BINOUTPUT_LAYOUT = 5
 # Scrambled BinOutput keys are recovered by matching values against this source's readable copy.
 READABLE_SOURCE = 'dimbreath'
 # Only the Excel aliases in SCHEMA affect preparation; they are fingerprinted separately.

@@ -20,6 +20,9 @@ parser.add_argument('--redirectfromstr', type = str)
 parser.add_argument('--oldrev', type = str, help = 'GitHub data source: compare --newenemies and --fishingpoints new against this commit, or "previous" for the newest commit of the previous game version, instead of RepoPathOld.')
 parser.add_argument('--newnamesonly', type = bool, help = '--newenemies: only write pages for enemy names that did not exist in the older build.')
 parser.add_argument('--enemies', type = str, help = 'Comma-separated monster IDs: write their pages and stat tables (with --ver).')
+parser.add_argument('--abyss', type = str, help = 'Write the Spiral Abyss/Floors page of the rotation starting on this date (YYYY-MM-DD), or "latest" (with --ver for startVersion).')
+parser.add_argument('--stygian', type = str, help = 'Write the Stygian Onslaught page of the event starting on this date (YYYY-MM-DD), or "latest" (with --ver).')
+parser.add_argument('--theater', type = str, help = 'Write the Imaginarium Theater page of the season starting on this date (YYYY-MM-DD), or "latest" (with --ver for startVersion).')
 
 args = parser.parse_args()
 
@@ -89,3 +92,15 @@ if args.capkeys:
 if args.redirectfromstr:
     from utils.redirect import redirects_from_str
     redirects_from_str(args.redirectfromstr)
+
+if args.abyss:
+    from utils.abyss import write_abyss_page
+    write_abyss_page(None if args.abyss == 'latest' else args.abyss, args.ver or '')
+
+if args.stygian:
+    from utils.stygian import write_stygian_page
+    write_stygian_page(None if args.stygian == 'latest' else args.stygian, args.ver or '')
+
+if args.theater:
+    from utils.theater import write_theater_page
+    write_theater_page(None if args.theater == 'latest' else args.theater, args.ver or '')

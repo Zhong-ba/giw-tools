@@ -6,8 +6,8 @@ import {
     FileText, Fish, FolderOpen, Image as ImageIcon, KeyRound, LayoutGrid, Link2, ListPlus, LoaderCircle, Maximize2, Minimize2, Pencil, Play,
     RotateCcw, Save, Scale, Search, Send, Square, Terminal, Trash2, X,
 } from 'lucide-react'
-  import { BearFace, CrescentBird, HornedMask } from './icons'
-import type { Artifact, BotSettings, BotState, Character, Dataset, Job, Parameters, PickerItem, PreparedDatasets, Property, QueueEntry, QueueItem, Revision, ServerConfig, Tool, Versions } from './api'
+  import { AbyssSpiral, BearFace, CrescentBird, HornedMask, StygianLotus, TheaterBook } from './icons'
+import type { Artifact, BotSettings, BotState, Character, Dataset, Job, Parameters, Period, PickerItem, PreparedDatasets, Property, QueueEntry, QueueItem, Revision, ServerConfig, Tool, Versions } from './api'
 import { api, datasetChoice, downloadArchive, hosted, message, serverConfig, setDatasetChoice, useAssetUrl } from './api'
 import type { StorageInfo } from './local'
 import { highlightWikitext } from './wikitext'
@@ -18,7 +18,7 @@ import type { JsonHit } from './JsonView'
 import { startParty, stopParty } from './party'
 
 const icons: Record<string, typeof BookOpen> = { 'other-languages': CrescentBird, 'character-kit': BearFace, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, redirects: Link2, enemy: HornedMask,
-  bounties: Crosshair, 'fishing-points': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot }
+  bounties: Crosshair, 'fishing-points': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianLotus }
 const picksCharacter = (tool: Tool | null) => !!tool && 'character_id' in tool.schema.properties
 const advanced = new Set(['natlan', 'nodkrai', 'hexerei', 'stellar', 'traveler', 'skill_depot'])
 const passiveTypes = ['natlan', 'nodkrai', 'hexerei', 'stellar']
@@ -115,6 +115,47 @@ const pickers: Record<string, PickerConfig> = {
     search: 'Search by enemy, ID or region...', compare: false, selectAll: true },
 }
 const pickerKey = (tool: Tool) => Object.keys(pickers).find(key => key in tool.schema.properties)
+
+/** A checklist of the dataset's dated periods (newest first, which starts selected), like the enemy picker. */
+function PeriodPicker({ label, kind, value, onChange }: { label: string; kind: string; value: string[]; onChange: (value: string[]) => void }) {
+  const [periods, setPeriods] = useState<Period[] | null>(null)
+  const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange })
+  useEffect(() => {
+    const controller = new AbortController()
+    api<Period[]>(`/periods/${kind}`, { signal: controller.signal })
+      .then(result => { setPeriods(result); onChangeRef.current(result.length ? [result[0].value] : []) })
+      .catch(reason => { if (!controller.signal.aborted) { setError(message(reason)); setPeriods([]) } })
+    return () => controller.abort()
+  }, [kind])
+  const plural = label.toLowerCase()
+  const selected = new Set(value)
+  const term = search.trim().toLowerCase()
+  const shown = (periods ?? []).filter(period => !term || `${period.label} ${period.name ?? ''}`.toLowerCase().includes(term))
+  const toggle = (id: string, on: boolean) => onChange(on ? [...value, id] : value.filter(item => item !== id))
+  return <div className="item-picker">
+    <input aria-label={`Filter ${plural}`} placeholder="Search by date or name..." value={search}
+      onChange={event => setSearch(event.target.value)} />
+    <div className="picker-toolbar">
+      <span>{periods ? `${value.length} of ${periods.length} selected` : `Loading ${plural}...`}</span>
+      <button type="button" className="button secondary" disabled={!shown.length}
+        onClick={() => onChange([...new Set([...value, ...shown.map(period => period.value)])])}>Select Shown</button>
+      <button type="button" className="button secondary" disabled={!value.length} onClick={() => onChange([])}>Clear</button>
+    </div>
+    <div className="picker-list" role="group" aria-label={label}>
+      {periods && !shown.length && <div className="empty-note">{periods.length ? `No ${plural} match the search.` : `No ${plural} found.`}</div>}
+      {shown.map(period => <label className="check-field" key={period.value}>
+        <input type="checkbox" checked={selected.has(period.value)} onChange={event => toggle(period.value, event.target.checked)} />
+        <span><strong>{period.name ?? period.label}</strong>
+          <small>{[period.name && period.label, period.value === periods?.[0]?.value && 'Latest'].filter(Boolean).join(' · ')}</small></span>
+      </label>)}
+    </div>
+    {!value.length && periods && periods.length > 0 && <small>None selected: the newest one is generated.</small>}
+    {error && <small className="field-error" role="alert">{error}</small>}
+  </div>
+}
 
 function ItemPicker({ config, value, onChange, onVersion }: {
   config: PickerConfig; value: number[]; onChange: (value: number[]) => void; onVersion: (version: string) => void
@@ -258,6 +299,32 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
     autoVersion.current = version
     return { ...previous, version }
   }), [])
+  // Tools that pick dated periods fill the version from the wiki's Date to Version for a single period; with several,
+  // the field stays empty so each page gets its own.
+  const periodKey = 'version' in tool.schema.properties
+    ? Object.keys(tool.schema.properties).find(key => tool.schema.properties[key].periods) : undefined
+  const periodDates = periodKey && Array.isArray(values[periodKey]) ? values[periodKey].map(String).join(',') : null
+  useEffect(() => {
+    if (periodDates === null) return
+    const dates = periodDates ? periodDates.split(',') : []
+    if (dates.length !== 1) {
+      const start = setTimeout(() => {
+        autofillVersion('')
+        setVersionNote(dates.length > 1 ? 'Leave empty to give each page the version live at its start (wiki Date to Version).' : '')
+      }, 0)
+      return () => clearTimeout(start)
+    }
+    const controller = new AbortController()
+    const start = setTimeout(() => setVersionNote('Looking up the version on the wiki...'), 0)
+    api<Record<string, string>>(`/date-versions?${new URLSearchParams({ dates: dates[0] })}`, { signal: controller.signal })
+      .then(result => {
+        const version = result[dates[0]]
+        if (version) autofillVersion(version)
+        setVersionNote(version ? `Wiki Date to Version gives ${version} for ${dates[0]}.` : `The wiki has no version for ${dates[0]}.`)
+      })
+      .catch(reason => { if (!controller.signal.aborted) setVersionNote(`Could not check the wiki: ${message(reason)}`) })
+    return () => { clearTimeout(start); controller.abort() }
+  }, [periodDates, autofillVersion])
   const field = (key: string, property: Property) => {
     const type = property.type ?? property.anyOf?.find(item => item.type !== 'null')?.type
     const required = tool.schema.required?.includes(key)
@@ -276,8 +343,10 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
             .map(item => <option key={item.id} value={item.id}>{item.name} ({item.id})</option>)}
         </select>
         {characterError && <small className="field-error" role="alert">{characterError}</small>}
-      </> : pickers[key] ? <ItemPicker config={pickers[key]} value={Array.isArray(values[key]) ? values[key] : []}
+      </> : pickers[key] ? <ItemPicker config={pickers[key]} value={Array.isArray(values[key]) ? values[key].map(Number) : []}
         onChange={value => update(key, value)} onVersion={autofillVersion} />
+      : property.periods ? <PeriodPicker label={property.title} kind={property.periods}
+        value={Array.isArray(values[key]) ? values[key].map(String) : []} onChange={value => update(key, value)} />
       : property.enum ? <select id={key} required={required} value={String(values[key] ?? '')}
         onChange={event => update(key, event.target.value)}>
         {property.enum.map(option => <option key={option} value={option}>{option}</option>)}

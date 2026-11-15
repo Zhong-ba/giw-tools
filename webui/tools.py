@@ -3,9 +3,9 @@ from pathlib import Path
 import re
 import runpy
 import sys
-from typing import Callable, Literal
+from typing import Annotated, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, field_validator
 
 from dataSource import ROOT
 
@@ -122,6 +122,39 @@ class CookingInputs(Inputs):
     images: Literal['none', 'missing', 'all'] = Field(
         default='none', title='Dial images',
         description='Also draw the dial images: none, only those missing from the English wiki, or every combination in use.')
+
+
+StartDate = Annotated[str, StringConstraints(pattern=r'^\d{4}-\d{2}-\d{2}$')]
+
+
+class AbyssInputs(Inputs):
+    starts: list[StartDate] = Field(default_factory=list, max_length=200, title='Rotations',
+                                    description='Each selected rotation gets a page, titled by its start date. '
+                                                'None selected means the newest rotation in the data.',
+                                    json_schema_extra={'periods': 'abyss'})
+    version: str = Field(default='', max_length=32, title='Start version',
+                         description='The header\'s startVersion. When empty, each page uses the version live at its '
+                                     'start, per the wiki\'s Date to Version.')
+
+
+class StygianInputs(Inputs):
+    starts: list[StartDate] = Field(default_factory=list, max_length=50, title='Events',
+                                    description='Each selected event gets a page, titled by its start date. '
+                                                'None selected means the newest event in the data.',
+                                    json_schema_extra={'periods': 'stygian'})
+    version: str = Field(default='', max_length=32, title='Version',
+                         description='The event\'s version and Change History. When empty, each page uses the version '
+                                     'live at its start, per the wiki\'s Date to Version.')
+
+
+class TheaterInputs(Inputs):
+    starts: list[StartDate] = Field(default_factory=list, max_length=100, title='Seasons',
+                                    description='Each selected season gets a page, titled by its start date. '
+                                                'None selected means the newest season in the data.',
+                                    json_schema_extra={'periods': 'theater'})
+    version: str = Field(default='', max_length=32, title='Start version',
+                         description='The header\'s startVersion. When empty, each page uses the version live at its '
+                                     'start, per the wiki\'s Date to Version.')
 
 
 def other_languages(output: Path, parameters: dict[str, JsonValue]) -> None:
@@ -257,6 +290,32 @@ def manual_cooking(output: Path, parameters: dict[str, JsonValue]) -> None:
         print(f'Drew {len(drawn)} dial image{"" if len(drawn) == 1 else "s"}.', flush=True)
 
 
+def spiral_abyss(output: Path, parameters: dict[str, JsonValue]) -> None:
+    inputs = AbyssInputs.model_validate(parameters)
+    from utils.abyss import write_abyss_page
+
+    for start in dict.fromkeys(inputs.starts) or [None]:
+        write_abyss_page(start, inputs.version.strip(), str(output))
+
+
+def stygian_onslaught(output: Path, parameters: dict[str, JsonValue]) -> None:
+    inputs = StygianInputs.model_validate(parameters)
+    import OLGen
+    from utils.stygian import write_stygian_page
+
+    OLGen.load_data()
+    for start in dict.fromkeys(inputs.starts) or [None]:
+        write_stygian_page(start, inputs.version.strip(), str(output))
+
+
+def imaginarium_theater(output: Path, parameters: dict[str, JsonValue]) -> None:
+    inputs = TheaterInputs.model_validate(parameters)
+    from utils.theater import write_theater_page
+
+    for start in dict.fromkeys(inputs.starts) or [None]:
+        write_theater_page(start, inputs.version.strip(), str(output))
+
+
 @dataclass(frozen=True)
 class Tool:
     id: str
@@ -286,6 +345,15 @@ TOOLS = {
         Tool('enemy', 'Enemy', 'Enemies',
              'Generate pages and stat tables for any enemies, or those added between two versions.',
              EnemyInputs, enemy),
+        Tool('spiral-abyss', 'Spiral Abyss', 'Enemies',
+             'Generate a Spiral Abyss/Floors page with Ley Line Disorder and each chamber\'s level, target and enemies.',
+             AbyssInputs, spiral_abyss),
+        Tool('imaginarium-theater', 'Imaginarium Theater', 'Enemies',
+             'Generate an Imaginarium Theater season page with each act\'s battles, stage effects, objectives, levels and enemies.',
+             TheaterInputs, imaginarium_theater),
+        Tool('stygian-onslaught', 'Stygian Onslaught', 'Enemies',
+             'Generate a Stygian Onslaught event page with each difficulty\'s lineup, mechanics, descriptions and rewards.',
+             StygianInputs, stygian_onslaught),
         Tool('fishing-points', 'Fishing Point', 'World',
              'Generate Fishing Point pages with their fish, area and limits, for any points or those added between two versions.',
              FishingInputs, fishing_points),

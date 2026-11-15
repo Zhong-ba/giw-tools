@@ -28,3 +28,30 @@ export const HornedMask = createLucideIcon('HornedMask', [
   ['path', { d: 'M15.2 9.44C16.81 11.5 15.89 13.79 13.6 15.39C12.69 16.08 12.46 16.99 12.57 17.91', key: 'wing-right' }],
   ['path', { d: 'M9.02 17.91L12 20.42L14.98 17.91', key: 'chevron' }],
 ])
+
+// The Spiral Abyss: an eye at the bottom of two widening staircase arms.
+export const AbyssSpiral = createLucideIcon('AbyssSpiral', [
+  ['circle', { cx: '12', cy: '12', r: '2.4', key: 'eye' }],
+  ['path', { d: 'M12 6.8A5.85 5.85 0 0 1 18.5 12A7.15 7.15 0 0 1 12 19.8A8.45 8.45 0 0 1 2.9 12A9.75 9.75 0 0 1 12 1.6', key: 'arm-1' }],
+  ['path', { d: 'M12 17.2A5.85 5.85 0 0 1 5.5 12A7.15 7.15 0 0 1 12 4.2A8.45 8.45 0 0 1 21.1 12A9.75 9.75 0 0 1 12 22.4', key: 'arm-2' }],
+])
+
+// Stygian Onslaught: a cupped, spiky lotus bloom over flared petals.
+export const StygianLotus = createLucideIcon('StygianLotus', [
+  ['path', { d: 'M7.6 13.2C6.7 10 7 6.6 8.4 3.8L10.3 6.4L12 3.2L13.7 6.4L15.6 3.8C17 6.6 17.3 10 16.4 13.2C14.4 15 9.6 15 7.6 13.2Z', key: 'bloom' }],
+  ['path', { d: 'M10.3 6.4C10 9.2 10.6 11.8 12 14.2C13.4 11.8 14 9.2 13.7 6.4', key: 'seam' }],
+  ['path', { d: 'M12 18.6C7.4 19.4 3.6 17.6 2 14.2C4 13.4 6.2 13.4 8.2 14.4', key: 'petal-left' }],
+  ['path', { d: 'M12 18.6C16.6 19.4 20.4 17.6 22 14.2C20 13.4 17.8 13.4 15.8 14.4', key: 'petal-right' }],
+])
+
+// Imaginarium Theater: an open script before a diamond frame.
+export const TheaterBook = createLucideIcon('TheaterBook', [
+  ['path', { d: 'M7.2 5.6L12 1.2L16.8 5.6', key: 'tip-top' }],
+  ['path', { d: 'M2.8 10.2L1.2 12L2.8 13.8', key: 'tip-left' }],
+  ['path', { d: 'M21.2 10.2L22.8 12L21.2 13.8', key: 'tip-right' }],
+  ['path', { d: 'M10.2 21.4L12 22.8L13.8 21.4', key: 'tip-bottom' }],
+  ['path', { d: 'M12 8C10.3 6.6 7.6 6.1 5.6 6.6V16C7.6 15.6 10.3 16.1 12 17.5C13.7 16.1 16.4 15.6 18.4 16V6.6C16.4 6.1 13.7 6.6 12 8Z', key: 'pages' }],
+  ['path', { d: 'M3.2 9.2V18.6H10.6L12 19.8L13.4 18.6H20.8V9.2', key: 'cover' }],
+  ['path', { d: 'M8.8 9.6Q9 11.6 10.8 11.8Q9 12 8.8 14Q8.6 12 6.8 11.8Q8.6 11.6 8.8 9.6Z', key: 'sparkle' }],
+  ['path', { d: 'M14.6 9.8L16 9.6M14.6 12.6L16 12.4', key: 'lines' }],
+])

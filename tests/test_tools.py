@@ -689,6 +689,163 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(list(weights.items()), [('Koi', 200), ("Angler's Fish", 300), ('Ornamental Koi', 12)])
         self.assertIn("\t['Angler\\'s Fish'] = 300,\n", fishing.fish_weights_lua(weights))
 
+    def test_spiral_abyss_page(self):
+        self.write_json(self.excel / 'TowerScheduleExcelConfigData.json', [
+            {'ScheduleId': 2, 'CloseTime': '2026-12-16 03:59:59', 'BuffnameTextMapHash': 'Glistening Moon', 'MonthlyLevelConfigId': 40,
+             'Schedules': [{'FloorList': [1, 3], 'OpenTime': '2026-11-16 04:00:00'}, {}]},
+            {'ScheduleId': 1, 'CloseTime': '2026-11-16 03:59:59', 'Schedules': [{'FloorList': [1, 2], 'OpenTime': '2026-10-16 04:00:00'}]},
+        ])
+        self.write_json(self.excel / 'TowerFloorExcelConfigData.json', [
+            {'FloorId': 1, 'FloorIndex': 11, 'LevelGroupId': 10, 'FloorLevelConfigId': 20},
+            {'FloorId': 3, 'FloorIndex': 12, 'LevelGroupId': 30, 'FloorLevelConfigId': 33, 'XKEY': 32, 'YKEY': 31, 'TeamNum': 2},
+        ])
+        self.write_json(self.excel / 'TowerLevelExcelConfigData.json', [
+            {'LevelGroupId': 30, 'LevelIndex': 2, 'MonsterLevel': 97, 'FirstMonsterList': ['Old Name'], 'SecondMonsterList': [77],
+             'Conds': [{'TowerCondType': 'TOWER_COND_LEFT_HP_GREATER_THAN', 'ArgumentList': [9, 9, n]} for n in (20, 40, 60)]},
+            {'LevelGroupId': 30, 'LevelIndex': 1, 'MonsterLevel': 94, 'TowerMonsterPreview': 'PT9',
+             'TowerMonsterPreviewId1': 1, 'TowerMonsterPreviewId2': 2,
+             'Conds': [{'TowerCondType': 'TOWER_COND_CHALLENGE_LEFT_TIME_MORE_THAN', 'ArgumentList': [2, n]} for n in (180, 300, 420)]},
+        ])
+        self.write_json(self.excel / 'DungeonLevelEntityConfigData.json', [
+            {'Id': 33, 'DescTextMapHash': 123, 'LevelConfigName': 'HpUp'},
+            {'Id': 31, 'Show': True, 'DescTextMapHash': 'Swirl DMG <color=#FFD780FF>+75%</color>.'},
+            {'Id': 32, 'Show': True, 'DescTextMapHash': 'Pyro DMG +75%.'},
+            {'Id': 40, 'Show': True, 'DescTextMapHash': 'Shockwaves.'},
+        ])
+        self.write_json(self.excel / 'MonsterDescribeExcelConfigData.json', [{'Id': 501, 'NameTextMapHash': 'Lion'}, {'Id': 502, 'NameTextMapHash': 'Wolf'}])
+        self.write_json(self.excel / 'MonsterExcelConfigData.json', [{'Id': 77, 'DescribeName': 'Golem'}])
+        (self.work / 'BinOutput' / 'MonsterPreview').mkdir()
+        self.write_json(self.work / 'BinOutput' / 'MonsterPreview' / 'MonsterPreview_PT9.json', [
+            {'AAA': 95, 'BBB': 1, 'CCC': [{'DDD': 95, 'EEE': 501}, {'DDD': 95, 'EEE': 502}, {'DDD': 95, 'EEE': 501}]},
+            {'AAA': 95, 'BBB': 2, 'CCC': [{'DDD': 95, 'EEE': 502}]},
+        ])
+        abyss = importlib.import_module('utils.abyss')
+        title, page = abyss.abyss_page(version='7.2')
+        self.assertEqual(title, 'Spiral Abyss/Floors/2026-11-16')
+        self.assertIn('{{Abyssal Moon Spire\n|startVersion   = 7.2\n|start          = 2026-11-16\n|end            = 2026-12-15\n'
+                      '|prev           = 2026-10-16\n|next           = 2026-12-16\n|floor12Changed = 1\n}}', page)
+        self.assertIn('{{Blessing of the Abyssal Moon Schedule}}\n<!-- Glistening Moon: Shockwaves. -->', page)
+        self.assertNotIn('Floor 11', page)
+        self.assertIn("===Floor 12===\n* '''Ley Line Disorder'''\n** {{Color|menu|First Half}}: Swirl DMG +75%.\n"
+                      '** {{Color|menu|Second Half}}: Pyro DMG +75%.\n', page)
+        self.assertIn('|level1      = 95\n|target1     = Remaining challenge time longer than (180/300/420) sec.\n'
+                      '|enemies1_1  = Lion; Wolf\n|enemies1_2  = Wolf\n|note1       = \n'
+                      '|level2      = 98\n|target2     = Target defense progress greater than (20/40/60)%.\n'
+                      '|enemies2_1  = Old Name\n|enemies2_2  = Golem\n', page)
+        with self.assertRaisesRegex(ValueError, 'Recent rotations: 2026-10-16, 2026-11-16'):
+            abyss.abyss_page('2026-01-01')
+
+    def test_stygian_onslaught_variants(self):
+        self.write_json(self.work / 'TextMap' / 'TextMapEN.json', {
+            '1': 'Stellar Glimmer characters <Color=#FFFFFF40> | </Color>{SPRITE_PRESET#11004} characters',
+            '2': '{SPRITE_PRESET#11034} reactions', '3': 'Courage: Draught', '4': 'Valiant',
+            '5': 'Detail <color=#FFD780FF>hot</color> drinks — more.', '6': 'Detail two.',
+            '7': 'Bullet with <color=#FF9999FF>Pyro DMG</color>.', '8': 'Second bullet.', '9': 'Only bullet.',
+        })
+        self.write_json(self.excel / 'SpriteTagExcelConfigData.json', [
+            {'Id': 11004, 'FallbackPureTextTextMapHash': 'Electro', 'SpritePath': 'ART/UI_Buff_Element02_Elect'},
+            {'Id': 11034, 'FallbackPureTextTextMapHash': 77, 'SpritePath': 'ART/UI_LeyLineChallenge_Icon_WaterElect'},
+        ])
+        rows = [
+            {'Id': 1, 'LevelNameTextMapHash': 'Wavebinder: Normal', 'ZZ': 'A beast.', 'KK': ['Advantage', 'Disadvantage', 'None'],
+             'LL': [1, 2, 0], 'BB': [7, 8, 0, 0, 0], 'TT': [3, 4, 0, 0, 0], 'DD': [5, 6, 0, 0, 0]},
+            {'Id': 2, 'LevelNameTextMapHash': 'Secret Source Automaton: Overseer Device - Normal', 'ZZ': 'A machine.',
+             'KK': ['Advantage', 'None', 'None'], 'LL': [2, 0, 0], 'BB': [9, 0, 0, 0, 0], 'TT': [4, 3, 0, 0, 0], 'DD': [6, 5, 0, 0, 0]},
+        ]
+        stygian = importlib.import_module('utils.stygian')
+        text = stygian.Text()
+        columns = stygian.Columns(rows, text)
+        self.assertEqual((columns.kinds, columns.lines, columns.titles, columns.details, columns.bullets), ('KK', 'LL', 'TT', 'DD', 'BB'))
+        first, second = (stygian.Variant(row, text, columns) for row in rows)
+        self.assertEqual(first.enemy, 'Wavebinder')
+        self.assertEqual(second.enemy, 'Secret Source Automaton: Overseer Device')
+        self.assertEqual(first.advantage,
+                         '[[File:Icon Stygian Onslaught Advantage.png|20px|link=]] Stellar Glimmer characters {{!}} '
+                         '[[File:Element Electro.png|20px|link=]] characters, [[File:Icon Stygian Onslaught Disadvantage.png|20px|link=]] '
+                         '[[File:Icon Stygian Onslaught Electro-Charged.png|40px|link=]] reactions')
+        self.assertEqual(first.mechanics, [('Courage{{Colon}} Draught', 'Detail {{Color|help|hot}} drinks &mdash; more.'), ('Valiant', 'Detail two.')])
+        self.assertEqual(first.bullets, ['Bullet with {{Color|pyro|Pyro DMG}}.', 'Second bullet.'])
+        self.assertEqual(second.bullets, ['Only bullet.'])
+
+    def test_imaginarium_theater_page(self):
+        # Scrambled column names are found by value: the act number, tag lists, level type and the three ID lists.
+        self.write_json(self.excel / 'RoleCombatScheduleExcelConfigData.json', [
+            {'AvatarConfigId': 1, 'BeginTimeStr': '2026-10-01 04:00:00', 'XE': '2026-11-01 03:59:59', 'XD': [1, 2], 'XL': [1, 2, 3]},
+            {'AvatarConfigId': 2, 'BeginTimeStr': '2026-11-01 04:00:00', 'XE': '2026-12-01 03:59:59', 'XD': [1, 2], 'XL': [1, 2, 3]},
+        ])
+        self.write_json(self.excel / 'RoleCombatAvatarConfigExcelConfigData.json', [
+            {'AvatarConfigId': 2, 'GU': [10000007, 10000008], 'EL': [2, 3, 0], 'OA': [10000002, 10000003, 10000006]},
+        ])
+        self.write_json(self.excel / 'AvatarExcelConfigData.json', [
+            {'Id': 10000000 + n, 'NameTextMapHash': name}
+            for n, name in ((2, 'Ayaka'), (3, 'Jean'), (6, 'Lisa'), (7, 'Fischl'), (8, 'Barbara'))])
+        self.write_json(self.excel / 'RoleCombatAvatarTagExcelConfigData.json', [
+            {'Tag': 2, 'TagDescTextMapHash': '<color=#ef5534>Pyro</color>', 'TY': 'ROLE_COMBAT_AVATAR_TAG_TYPE_ELEM'},
+            {'Tag': 3, 'TagDescTextMapHash': '<color=#0075de>Hydro</color>', 'TY': 'ROLE_COMBAT_AVATAR_TAG_TYPE_ELEM'},
+        ])
+        self.write_json(self.excel / 'RoleCombatTarotAvatarExcelConfigData.json', [
+            {'AvatarID': 10000003, 'AbilityGroup': 'Buff_01', 'BL': '{{Color|bp|After the above characters join your party, Max HP is increased.}}'}])
+        self.write_json(self.excel / 'RoleCombatDifficultyExcelConfigData.json', [
+            {'DifficultyId': 1, 'DifficultyLevel': 1, 'PP': 100, 'NN': 5},
+            {'DifficultyId': 2, 'DifficultyLevel': 2, 'PP': 200, 'NN': 5},
+            {'DifficultyId': 3, 'DifficultyLevel': 3, 'PP': 200, 'AR': 900},
+        ])
+        self.write_json(self.excel / 'RoleCombatFightRuleExcelConfigData.json', [
+            {'RuleId': 1, 'PoolId': 100, 'MonsterLevel': 74, 'ACT': 1, 'TG': [{'TagList': [10]}, {}]},
+            {'RuleId': 2, 'PoolId': 200, 'MonsterLevel': 79, 'ACT': 1, 'TG': [{'TagList': [10]}, {}]},
+            {'RuleId': 3, 'PoolId': 200, 'MonsterLevel': 89, 'ACT': 2, 'BS': 1003, 'TG': [{'TagList': [20]}, {}]},
+            {'RuleId': 4, 'PoolId': 900, 'MonsterLevel': 99, 'ACT': 2, 'TG': [{'TagList': [30]}, {}]},
+        ])
+        self.write_json(self.excel / 'RoleCombatLevelExcelConfigData.json', [
+            {'Id': 1, 'Tag': 10, 'MonsterPreviewId': 1, 'BossTitleTextMapHash': 5, 'BossDescTextMapHash': 6, 'TY': 1, 'EF': [1], 'ST': [1, 3]},
+            {'Id': 2, 'Tag': 20, 'MonsterPreviewId': 2, 'BossTitleTextMapHash': 'Pride', 'BossDescTextMapHash': 'A \\nbig lion.',
+             'TY': 5, 'ST': [3], 'AD': [2]},
+            {'Id': 3, 'Tag': 30, 'MonsterPreviewId': 3, 'BossTitleTextMapHash': 'Keep Fighting', 'BossDescTextMapHash': 'Survive.',
+             'TY': 14, 'ST': [3]},
+        ])
+        self.write_json(self.excel / 'RoleCombatLevelDescExcelConfigData.json', [
+            {'Id': 1, 'LevelNameTextMapHash': 'Battle: Normal', 'LevelDescTextMapHash': 'Defeat all opponents', 'PR': ['', '']},
+            {'Id': 5, 'LevelNameTextMapHash': 'Battle: Climactic Showdown', 'LevelType': 'BOSS',
+             'LevelDescTextMapHash': 'Defeat the Villain(s) within the time limit'},
+            {'Id': 14, 'LevelNameTextMapHash': 'Arcana Challenge', 'LevelType': 'SURVIVAL',
+             'LevelDescTextMapHash': 'Keep fighting until the countdown ends'},
+        ])
+        self.write_json(self.excel / 'RoleCombatLevelEntityExcelConfigData.json', [{'Id': 1, 'TitleTextMapHash': 'Thunder', 'DescTextMapHash': 'Strikes.'}])
+        self.write_json(self.excel / 'RoleCombatLevelTopicTagExcelConfigData.json', [
+            {'Id': 1, 'TitleTextMapHash': 'Enemies Are Easily Grouped'},
+            {'Id': 2, 'TitleTextMapHash': '<color=#0075de>Hydro</color> characters have an advantage'}])
+        self.write_json(self.excel / 'RoleCombatExtraLevelTargetExcelConfigData.json', [
+            {'Id': 1, 'DescTextMapHash': 'Trigger Swirl reactions {{Color|bp|{1}}} times', 'DescParamList': ['{1}', '5']},
+            {'Id': 2, 'DescTextMapHash': 'Unused'},
+            {'Id': 3, 'DescTextMapHash': 'Defeat all opponents within {{Color|bp|{0}}}s', 'DescParamList': ['80', ''], 'FL': True},
+        ])
+        self.write_json(self.excel / 'MonsterDescribeExcelConfigData.json', [
+            {'Id': 501, 'NameTextMapHash': 'Lion King'}, {'Id': 502, 'NameTextMapHash': 'Wolf'}, {'Id': 503, 'NameTextMapHash': 'Ghost'}])
+        self.write_json(self.excel / 'ManualTextMapConfigData.json', [])
+        (self.work / 'BinOutput' / 'MonsterPreview').mkdir()
+        self.write_json(self.work / 'BinOutput' / 'MonsterPreview' / 'MonsterPreview_RoleCombatLevel.json', [
+            {'FL': True, 'id': 1, 'MM': [{'A': 502}, {'D': True, 'A': 503}]},
+            {'FL': True, 'id': 2, 'MM': [{'A': 501}]}, {'FL': True, 'id': 3, 'MM': [{'A': 503}]}])
+        theater = importlib.import_module('utils.theater')
+        title, page = theater.theater_page(version='7.1')
+        self.assertEqual(title, 'Imaginarium Theater/Seasons/2026-11-01')
+        self.assertIn('|season       = 2\n|startVersion = 7.1\n|start        = 2026-11-01 04:00:00\n|end          = 2026-12-01 03:59:59\n'
+                      '|prev         = 2026-10-01\n|next         = 2026-12-01\n|characters   = Ayaka; Jean; Lisa\n'
+                      '|blessing     = After the above characters join your party, Max HP is increased.\n|elements     = Pyro; Hydro\n'
+                      '|guests       = Fischl; Barbara\n|enemies      = Lion King*Lv. 90\n}}', page)
+        star = '<br>{{Color|help|"Star Challenge"}} Defeat all opponents within {{Color|bp|80}}s'
+        self.assertIn("===Act 1===\n;Battle{{Colon}} Normal\n* '''Stage Effects''':\n** '''Thunder''': Strikes.\n{{Domain Enemies\n"
+                      '|target1    = Defeat all opponents<br>{{Color|bz|"Bonus Challenge"}} Trigger Swirl reactions {{Color|bp|5}} times'
+                      f'{star}\n|level1     = Easy Mode: 75<br>Normal Mode: 80\n|enemies1   = Wolf;Ghost{{ danger = 1 }}\n}}}}\n\n'
+                      '===Arcana Challenge I===\n{{Description|Survive.|Keep Fighting}}\n{{Domain Enemies\n'
+                      f'|target1    = {{{{Color|#764bf7|Arcana Challenge}}}} Keep fighting until the countdown ends (?s){star}\n'
+                      '|level1     = 100\n|enemies1   = Ghost\n}}\n\n'
+                      '===Act 2===\n{{Description|A <br>big lion.|Lion King}}\n;Battle{{Colon}} Climactic Showdown\n{{Domain Enemies\n'
+                      f'|target1    = Defeat the Villain(s) within the time limit (?s){star}\n|level1     = 90\n'
+                      '|advantage1 = {{Color|Hydro}} characters have an advantage\n|enemies1   = Lion King\n}}\n', page)
+        with self.assertRaisesRegex(ValueError, 'Recent seasons: 2026-10-01, 2026-11-01'):
+            theater.theater_page('2026-01-01')
+
     def test_character_data_materials(self):
         charasc = importlib.import_module('utils.charasc')
         costs = lambda *items: {'CostItems': [{'Id': item, 'Count': count} for item, count in items]}

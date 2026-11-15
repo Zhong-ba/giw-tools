@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export type Parameters = Record<string, string | number | boolean | null | number[]>
+export type Parameters = Record<string, string | number | boolean | null | number[] | string[]>
 export interface Property {
   type?: string
   title: string
@@ -11,7 +11,10 @@ export interface Property {
   minimum?: number
   maximum?: number
   maxLength?: number
+  // A list of dated periods (Spiral Abyss rotations, Stygian Onslaught events) to pick from, served at /api/periods/<name>.
+  periods?: string
 }
+export interface Period { value: string; label: string; name?: string }
 export interface Tool {
   id: string
   name: string

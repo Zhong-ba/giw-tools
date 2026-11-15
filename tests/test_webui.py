@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+import urllib.parse
 from unittest.mock import patch
 from uuid import uuid4
 from zipfile import ZipFile
@@ -81,7 +82,7 @@ class WebTests(unittest.TestCase):
         tools = self.client.get('/api/tools').json()
         self.assertEqual({tool['id'] for tool in tools}, {'redirects', 'character-kit', 'other-languages',
                                                          'attribute-scaling', 'character-data', 'enemy', 'bounties', 'fishing-points', 'fish-weights',
-                                                         'manual-cooking'})
+                                                         'manual-cooking', 'spiral-abyss', 'stygian-onslaught', 'imaginarium-theater'})
         self.assertIn('properties', tools[0]['schema'])
         kit = next(tool for tool in tools if tool['id'] == 'character-kit')
         self.assertTrue({'element', 'generate_icons'}.isdisjoint(kit['schema']['properties']))
@@ -402,6 +403,39 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.client.get('/api/characters/10000021/version').json(), {'character': 'Amber', 'version': '1.0'})
             lookup.assert_called_once_with('Amber')
         self.assertEqual(self.client.get('/api/characters/99/version').status_code, 404)
+
+    def test_period_choices_newest_first(self):
+        excel = self.dataset / 'MappedExcelBinOutput_EN'
+        (excel / 'TowerScheduleExcelConfigData.json').write_text(json.dumps([
+            {'CloseTime': '2026-12-16 03:59:59', 'Schedules': [{'OpenTime': '2026-11-16 04:00:00'}]},
+            {'Schedules': [{'OpenTime': '2026-12-16 04:00:00'}]},
+            {'Schedules': [{}]},
+        ]), encoding='utf-8')
+        (excel / 'LeyLineChallengeExcelConfigData.json').write_text(json.dumps([
+            {'ChallengeNameTextMapHash': 'Great Waves', 'XA': '2026-11-11 10:00:00', 'XB': '2026-12-23 09:59:59'},
+        ]), encoding='utf-8')
+        self.assertEqual(self.client.get('/api/periods/abyss').json(), [
+            {'value': '2026-12-16', 'label': '2026-12-16'}, {'value': '2026-11-16', 'label': '2026-11-16 – 2026-12-15'}])
+        self.assertEqual(self.client.get('/api/periods/stygian').json(),
+                         [{'value': '2026-11-11', 'label': '2026-11-11 – 2026-12-15', 'name': 'Great Waves'}])
+        # Test schedules reuse a season's config and count at its last schedule; 2099 placeholders are skipped.
+        (excel / 'RoleCombatScheduleExcelConfigData.json').write_text(json.dumps([
+            {'AvatarConfigId': 1, 'BeginTimeStr': '2023-03-01 04:00:00', 'XA': '2023-04-01 03:59:59'},
+            {'AvatarConfigId': 1, 'BeginTimeStr': '2024-07-01 10:00:00', 'XA': '2024-08-01 03:59:59'},
+            {'AvatarConfigId': 2, 'BeginTimeStr': '2024-08-01 04:00:00', 'XA': '2024-09-01 03:59:59'},
+            {'AvatarConfigId': 3, 'BeginTimeStr': '2099-11-01 04:00:00', 'XA': '2099-12-01 03:59:59'},
+        ]), encoding='utf-8')
+        self.assertEqual(self.client.get('/api/periods/theater').json(), [
+            {'value': '2024-08-01', 'label': '2024-08-01 – 2024-09-01', 'name': 'Season 2'},
+            {'value': '2024-07-01', 'label': '2024-07-01 – 2024-08-01', 'name': 'Season 1'}])
+        self.assertEqual(self.client.get('/api/periods/other').status_code, 404)
+        with patch('urllib.request.urlopen') as urlopen:
+            urlopen.return_value.__enter__.return_value = io.BytesIO(json.dumps(
+                {'expandtemplates': {'wikitext': '2025-12-16=Luna III\n2026-11-11=7.2'}}).encode())
+            self.assertEqual(self.client.get('/api/date-versions?dates=2025-12-16,2026-11-11').json(),
+                             {'2025-12-16': 'Luna III', '2026-11-11': '7.2'})
+            self.assertIn('{{Date to Version|2025-12-16}}', urllib.parse.unquote_plus(urlopen.call_args[0][0].data.decode()))
+        self.assertEqual(self.client.get('/api/date-versions?dates=2025-12').status_code, 422)
         with patch('passiveTypes.character_passive_types', return_value=['stellar']) as detect:
             self.assertEqual(self.client.get('/api/characters/10000021/passives').json(), {'types': ['stellar']})
             detect.assert_called_once_with(10000021, self.dataset / 'MappedExcelBinOutput_EN')
