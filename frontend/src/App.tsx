@@ -11,6 +11,7 @@ import type { Artifact, BotSettings, BotState, Character, Dataset, Job, Paramete
 import { api, datasetChoice, downloadArchive, hosted, message, serverConfig, setDatasetChoice, useAssetUrl } from './api'
 import type { StorageInfo } from './local'
 import { highlightWikitext } from './wikitext'
+import { highlightLua } from './lua'
 import { findJson, sortKeys } from './json'
 import { JsonView } from './JsonView'
 import type { JsonHit } from './JsonView'
@@ -29,6 +30,7 @@ const time = (date: string) => new Date(date).toLocaleString(undefined, { month:
 const terminal = (text: string) => text.replace(/\r\n/g, '\n').split('\n')
   .map(line => line.split('\r').filter(Boolean).pop() ?? '').join('\n')
 const isWikitext = (path: string) => path.toLowerCase().endsWith('.wikitext')
+const isLua = (path: string) => path.toLowerCase().endsWith('.lua')
 const FULLSCREEN_KEY = 'wiki-tools.fullscreen'
 const preferFullscreen = () => { try { return localStorage.getItem(FULLSCREEN_KEY) === '1' } catch { return false } }
 const rememberFullscreen = (value: boolean) => { try { localStorage.setItem(FULLSCREEN_KEY, value ? '1' : '0') } catch { /* storage unavailable */ } }
@@ -377,7 +379,7 @@ function FilePreview({ jobId, file, editable, onDirty }: {
     {loading ? <div className="empty"><LoaderCircle className="spin" />Loading preview...</div> :
       draft !== null ? <WikitextEditor value={draft} onChange={edit} onSave={() => { void save() }} /> :
         kind === 'image' ? <div className="image-preview">{url && <img src={hosted() ? url : `${url}?inline=true`} alt={path} />}</div> :
-          kind === 'text' ? <pre className="text-preview">{wikitext ? highlightWikitext(text) : text}</pre> :
+          kind === 'text' ? <pre className="text-preview">{wikitext ? highlightWikitext(text) : isLua(path) ? highlightLua(text) : text}</pre> :
             <div className="empty"><ArrowDownToLine /><p>No preview available. Download to open.</p></div>}
   </div>
 }
