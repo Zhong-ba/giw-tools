@@ -14,7 +14,8 @@ from talentScaling import scaling_stats
 from talentUtilities import utilities, utility_lines
 
 # Each concept is linked once per description, at the first occurrence of any of its forms. Matching ignores case
-# except for CASE_SENSITIVE_KEYWORDS, whose lowercase forms are usually the plain word ("the water", "energy stored").
+# except for CASE_SENSITIVE_KEYWORDS, whose lowercase forms are usually the plain word ("the water", "energy stored",
+# "burning", "frozen"). A keyword is never linked inside a longer keyword or one of the character's talent names.
 LINK_KEYWORDS = [
     ('Nightsoul point',),
     ('Liquid Phlogiston',),
@@ -47,8 +48,66 @@ LINK_KEYWORDS = [
     ('Nightsoul Burst',),
     ('Nightsoul Transmission',),
     ('Natlan',),
+    # Elemental reactions
+    ('Elemental Reaction',),
+    ('Lunar Reaction',),
+    ('Swirl',),
+    ('Stellar Swirl',),
+    ('Bloom',),
+    ('Hyperbloom',),
+    ('Burgeon',),
+    ('Quicken',),
+    ('Aggravate',),
+    ('Spread',),
+    ('Burning',),
+    ('Superconduct',),
+    ('Overloaded',),
+    ('Electro-Charged',),
+    ('Crystallize',),
+    ('Frozen',),
+    ('Shatter',),
+    ('Vaporize',),
+    ('Melt',),
+    ('Lunar-Charged',),
+    ('Lunar-Bloom',),
+    ('Lunar-Crystallize',),
+    ('Stellar-Conduct',),
+    # Combat mechanics
+    ('AoE',),
+    ('Bond of Life',),
+    ('Elemental Absorption',),
+    ('Geo Construct',),
+    ('Shield',),
+    ('CRIT Hit',),
+    ('ATK SPD',),
+    # Team bonuses and Arkhe
+    ('Moonsign: Ascendant Gleam', 'Moonsign'),
+    ('Ascendant Gleam',),
+    ('Hexerei',),
+    ('Arkhe', 'Pneuma', 'Ousia'),
+    # Activities
+    ('Expedition',),
+    ('Spiral Abyss',),
+    ('Trounce Domain',),
+    ('Domain',),
+    # Attack types
+    ('Normal Attack',),
+    ('Charged Attack',),
+    ('Plunging Attack',),
+    ('Aimed Shot',),
+    ('Elemental Skill',),
+    ('Elemental Burst',),
 ]
-CASE_SENSITIVE_KEYWORDS = {'Water', 'Energy'}
+CASE_SENSITIVE_KEYWORDS = {
+    'Water', 'Energy', 'Elemental Reaction', 'Lunar Reaction', 'Swirl', 'Stellar Swirl', 'Bloom', 'Hyperbloom', 'Burgeon',
+    'Quicken', 'Aggravate', 'Spread', 'Burning', 'Superconduct', 'Overloaded', 'Electro-Charged', 'Crystallize', 'Frozen',
+    'Shatter', 'Vaporize', 'Melt', 'Lunar-Charged', 'Lunar-Bloom', 'Lunar-Crystallize', 'Stellar-Conduct', 'AoE',
+    'Bond of Life', 'Elemental Absorption', 'Geo Construct', 'Moonsign: Ascendant Gleam', 'Ascendant Gleam', 'Hexerei',
+    'Arkhe', 'Expedition', 'Spiral Abyss', 'Trounce Domain', 'Domain', 'Normal Attack', 'Charged Attack',
+    'Plunging Attack', 'Aimed Shot', 'Elemental Skill', 'Elemental Burst',
+}
+# Game terms that contain a keyword without being one, such as the Moonsign Benediction passive type.
+KEYWORD_BLOCKERS = ['Moonsign Benediction']
 # "Anemo RES" or "Physical RES" is one stat; linking just its "RES" splits it.
 ELEMENT_BEFORE = ''.join(f'(?<!{element} )' for element in ('Anemo', 'Geo', 'Electro', 'Dendro', 'Hydro', 'Pyro', 'Cryo', 'Physical'))
 KEYWORD_PATTERNS = [re.compile(
@@ -56,6 +115,12 @@ KEYWORD_PATTERNS = [re.compile(
     + r'\b(' + '|'.join(re.escape(form) for form in sorted(forms, key=len, reverse=True)) + r')(?=s?\b)',
     0 if forms[0] in CASE_SENSITIVE_KEYWORDS else re.IGNORECASE,
 ) for forms in LINK_KEYWORDS]
+# For each keyword, the other keywords' forms (and blockers) it would otherwise match inside, like "Bloom" in "Lunar-Bloom".
+CONTAINING_FORMS = [
+    [form for form in [*(form for other in LINK_KEYWORDS if other is not forms for form in other), *KEYWORD_BLOCKERS]
+     if (found := pattern.search(form)) and found.group(0) != form]
+    for forms, pattern in zip(LINK_KEYWORDS, KEYWORD_PATTERNS)
+]
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=int)
@@ -233,26 +298,45 @@ def parse_hyperlink(desc):
     return desc
         
         
-PROTECTED = re.compile(r'\{LINK#[A-Z]\d+\}.*?\{/LINK\}|\[\[.*?\]\]')
+# Existing links, {LINK#N} terms (which become Extra Effects) and bold text ('''Charged Attack''' headings) are not auto-linked.
+PROTECTED = re.compile(r"\{LINK#[A-Z]\d+\}.*?\{/LINK\}|\[\[.*?\]\]|'''.+?'''")
 LINK_TAG = re.compile(r'\{LINK#([SPT])(\d+)\}(.*?)\{/LINK\}')
+# Line breaks and list tags, after or before which the source is split onto a new line (see multiline).
+BREAK_AFTER = re.compile(r'(?:<br\s*/?>)+', re.IGNORECASE)
+BREAK_BEFORE = re.compile(r'</?(?:ul|ol)>|<li>', re.IGNORECASE)
+SOURCE_BREAK = '<!--\n-->'
 
 
-def mask(text):
-    '''Hides existing links and {LINK#N} terms (which become Extra Effects) so nothing is linked inside them.
-    Returns the masked text and a function that restores them.'''
+def multiline(desc):
+    '''Splits a description's source over several lines without changing how it renders: comments hide the newlines,
+    which would otherwise end the template parameter's paragraph or list.'''
+    desc = BREAK_AFTER.sub(lambda match: match.group(0) + SOURCE_BREAK, desc)
+    desc = BREAK_BEFORE.sub(lambda match: SOURCE_BREAK + match.group(0), desc)
+    desc = re.sub(f'(?:{re.escape(SOURCE_BREAK)})+', SOURCE_BREAK, desc)
+    return desc.removeprefix(SOURCE_BREAK).removesuffix(SOURCE_BREAK)
+
+
+def mask(text, hidden=()):
+    '''Hides existing links, {LINK#N} terms (which become Extra Effects) and the given phrases so nothing is linked
+    inside them. Returns the masked text and a function that restores them.'''
     saved = []
 
     def hide(match):
         saved.append(match.group(0))
         return f'\ue000{len(saved) - 1}\ue001'
-    masked = PROTECTED.sub(hide, text)
+    pattern = PROTECTED
+    if hidden:
+        phrases = '|'.join(re.escape(phrase) for phrase in sorted(hidden, key=len, reverse=True))
+        pattern = re.compile(rf'{PROTECTED.pattern}|(?<!\w)(?:{phrases})s?(?!\w)', re.IGNORECASE)
+    masked = pattern.sub(hide, text)
     return masked, lambda value: re.sub('\ue000(\\d+)\ue001', lambda match: saved[int(match.group(1))], value)
 
 
-def add_wikilinks(ability_description):
+def add_wikilinks(ability_description, names=()):
+    '''Links LINK_KEYWORDS, never inside a longer keyword or one of the given talent names.'''
     desc = ability_description
-    for pattern in KEYWORD_PATTERNS:
-        masked, restore = mask(desc)
+    for pattern, containing in zip(KEYWORD_PATTERNS, CONTAINING_FORMS):
+        masked, restore = mask(desc, [*containing, *(name for name in names if name and pattern.search(name))])
         desc = restore(pattern.sub(lambda match: f'[[{match.group(1)}]]', masked, count=1))
     return desc
 
@@ -293,7 +377,7 @@ def link_description(desc, title, unquoted=()):
         desc = link_name(desc, name, linked, quoted=False)
     for name in own_titles:
         desc = link_name(desc, name, linked, quoted=True)
-    return parse_hyperlink(add_wikilinks(desc))
+    return multiline(parse_hyperlink(add_wikilinks(desc, [title, *unquoted, *own_titles])))
 
 
 def parse_skill(id, ver, type = None, ability_dict = None, scaling = '', advanced = ''):        

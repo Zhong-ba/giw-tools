@@ -168,6 +168,15 @@ class ToolTests(unittest.TestCase):
         # Whole words or plurals only, one link per concept, case-sensitive Water/Energy, no "RES" inside "Anemo RES".
         self.assertEqual(tool['add_wikilinks']('waterspouts Water, heals and Healing, Anemo RES and RES. The energy of Energy.'),
                          'waterspouts [[Water]], [[heal]]s and Healing, Anemo RES and [[RES]]. The energy of [[Energy]].')
+        # Never inside a longer keyword (even an unlinked repeat) or one of the given talent names.
+        self.assertEqual(tool['add_wikilinks']('Healing Bonus and Healing Bonus. Lunar-Bloom, then Bloom.'),
+                         '[[Healing Bonus]] and Healing Bonus. [[Lunar-Bloom]], then [[Bloom]].')
+        self.assertEqual(tool['add_wikilinks']('Frozen Wilds deals AoE DMG.', ['Frozen Wilds']), 'Frozen Wilds deals [[AoE]] DMG.')
+        # Bold headings stay unlinked.
+        self.assertEqual(tool['add_wikilinks']("'''Charged Attack'''<br>A Charged Attack."), "'''Charged Attack'''<br>A [[Charged Attack]].")
+        # Breaks and lists are split over source lines like the wiki's own pages.
+        self.assertEqual(tool['multiline']('A<br><br>B:<ul><li>C</li><li>D</li></ul><br>E<br>'),
+                         'A<br><br><!--\n-->B:<!--\n--><ul><!--\n--><li>C</li><!--\n--><li>D</li><!--\n--></ul><br><!--\n-->E<br>')
         # The game's talent references become links (piped when the text differs), each page once.
         self.assertIn('|info          = [[Strike]] Strike\n', self.read_output('Tester/Passives/A1.wikitext'))
         self.assertIn('|description   = [[Skill]] [[Burst]]\n', self.read_output('Tester/Constellations/C1.wikitext'))
