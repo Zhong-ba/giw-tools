@@ -165,6 +165,17 @@ class ToolTests(unittest.TestCase):
         self.assertIn('|utility2      = Elemental Burst Level Increase', self.read_output('Tester/Constellations/C3.wikitext'))
         self.assertEqual(tool['add_wikilinks']('ATK ATK {LINK#N7}HP{/LINK}'), '[[ATK]] ATK {LINK#N7}HP{/LINK}')
         self.assertEqual(tool['parse_hyperlink']('{LINK#S1}Strike{/LINK}'), 'Strike')
+        # Whole words or plurals only, one link per concept, case-sensitive Water/Energy, no "RES" inside "Anemo RES".
+        self.assertEqual(tool['add_wikilinks']('waterspouts Water, heals and Healing, Anemo RES and RES. The energy of Energy.'),
+                         'waterspouts [[Water]], [[heal]]s and Healing, Anemo RES and [[RES]]. The energy of [[Energy]].')
+        # The game's talent references become links (piped when the text differs), each page once.
+        self.assertIn('|info          = [[Strike]] Strike\n', self.read_output('Tester/Passives/A1.wikitext'))
+        self.assertIn('|description   = [[Skill]] [[Burst]]\n', self.read_output('Tester/Constellations/C1.wikitext'))
+        self.assertEqual(tool['link_tags']('{LINK#P11}"Passive 11,"{/LINK} and {LINK#S1}Smash{/LINK}', set()),
+                         '"[[Passive 11]]," and [[Strike|Smash]]')
+        # Quoted names of the character's own talents are linked, but never the page itself.
+        self.assertEqual(tool['link_description']('Ascension Talent "Passive 14" and "Strike"', 'Strike'),
+                         'Ascension [[Talent]] "[[Passive 14]]" and "Strike"')
 
     def test_character_kit_arkhe(self):
         fetters = [{'AvatarId': {'Name': 'Tester'}, 'AvatarAssocType': 'ASSOC_TYPE_FONTAINE',

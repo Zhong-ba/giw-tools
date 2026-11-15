@@ -13,42 +13,49 @@ from getConfig import CONFIG
 from talentScaling import scaling_stats
 from talentUtilities import utilities, utility_lines
 
+# Each concept is linked once per description, at the first occurrence of any of its forms. Matching ignores case
+# except for CASE_SENSITIVE_KEYWORDS, whose lowercase forms are usually the plain word ("the water", "energy stored").
 LINK_KEYWORDS = [
-    'Nightsoul point',
-    'Liquid Phlogiston',
-    'Phlogiston',
-    'Nightsoul\'s Blessing',
-    'ATK',
-    'DEF',
-    'HP',
-    'Elemental Mastery',
-    'Energy Recharge',
-    'CRIT Rate',
-    'CRIT DMG',
-    'Healing Bonus',
-    'Shield Strength',
-    'Interruption resistance',
-    'Interruption Resistance',
-    'Healing',
-    'Heal',
-    'Talent',
-    'Sprinting',
-    'Climbing',
-    'Swimming',
-    'Party',
-    'Elemental RES',
-    'RES',
-    'Movement SPD',
-    'Conversion',
-    'Sprint',
-    'Water',
-    'Stamina',
-    'CD',
-    'Energy',
-    'Nightsoul Burst',
-    'Nightsoul Transmission',
-    'Natlan',
+    ('Nightsoul point',),
+    ('Liquid Phlogiston',),
+    ('Phlogiston',),
+    ('Nightsoul\'s Blessing',),
+    ('ATK',),
+    ('DEF',),
+    ('HP',),
+    ('Elemental Mastery',),
+    ('Energy Recharge',),
+    ('CRIT Rate',),
+    ('CRIT DMG',),
+    ('Healing Bonus',),
+    ('Shield Strength',),
+    ('Interruption Resistance',),
+    ('Healing', 'Heal'),
+    ('Talent',),
+    ('Sprinting', 'Sprint'),
+    ('Climbing',),
+    ('Swimming',),
+    ('Party',),
+    ('Elemental RES',),
+    ('RES',),
+    ('Movement SPD',),
+    ('Conversion',),
+    ('Water',),
+    ('Stamina',),
+    ('CD',),
+    ('Energy',),
+    ('Nightsoul Burst',),
+    ('Nightsoul Transmission',),
+    ('Natlan',),
 ]
+CASE_SENSITIVE_KEYWORDS = {'Water', 'Energy'}
+# "Anemo RES" or "Physical RES" is one stat; linking just its "RES" splits it.
+ELEMENT_BEFORE = ''.join(f'(?<!{element} )' for element in ('Anemo', 'Geo', 'Electro', 'Dendro', 'Hydro', 'Pyro', 'Cryo', 'Physical'))
+KEYWORD_PATTERNS = [re.compile(
+    (ELEMENT_BEFORE if forms == ('RES',) else '')
+    + r'\b(' + '|'.join(re.escape(form) for form in sorted(forms, key=len, reverse=True)) + r')(?=s?\b)',
+    0 if forms[0] in CASE_SENSITIVE_KEYWORDS else re.IGNORECASE,
+) for forms in LINK_KEYWORDS]
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=int)
@@ -92,6 +99,24 @@ with open(f'{CONFIG.EXCEL_PATH}/AvatarTalentExcelConfigData.json', 'r', encoding
     
 with open(f'{CONFIG.EXCEL_PATH}/HyperLinkNameExcelConifgData.json', 'r', encoding='utf-8') as file:
     hyperlinkexcel = json.load(file)
+
+SPECIAL_PASSIVE_PREFIX = re.compile(r"^(?:Night Realm's Gift|Moonsign Benediction|Witch's Eve Rite)\s*[:·]\s*")
+
+
+def passive_title(name):
+    '''The wiki page title of a passive: special passive types drop their "Night Realm's Gift: " style prefix.'''
+    return SPECIAL_PASSIVE_PREFIX.sub('', name)
+
+
+# Page titles of the talents and constellations that {LINK#S/P/T<id>} tags in descriptions refer to.
+TAG_TITLES = {
+    'S': {block['Id']: block['NameTextMapHash'] for block in skillexcel if isinstance(block.get('NameTextMapHash'), str)},
+    'P': {block['ProudSkillId']: passive_title(block['NameTextMapHash']) for block in proudskillexcel
+          if isinstance(block.get('NameTextMapHash'), str) and 'ProudSkillId' in block},
+    'T': {block['TalentId']: block['NameTextMapHash'] for block in talentexcel if isinstance(block.get('NameTextMapHash'), str)},
+}
+# This character's talent and constellation titles, linked where a description quotes them; set below.
+own_titles = []
     
 
 char_id = extract_last_digits(str(args.id))
@@ -208,22 +233,67 @@ def parse_hyperlink(desc):
     return desc
         
         
+PROTECTED = re.compile(r'\{LINK#[A-Z]\d+\}.*?\{/LINK\}|\[\[.*?\]\]')
+LINK_TAG = re.compile(r'\{LINK#([SPT])(\d+)\}(.*?)\{/LINK\}')
+
+
+def mask(text):
+    '''Hides existing links and {LINK#N} terms (which become Extra Effects) so nothing is linked inside them.
+    Returns the masked text and a function that restores them.'''
+    saved = []
+
+    def hide(match):
+        saved.append(match.group(0))
+        return f'\ue000{len(saved) - 1}\ue001'
+    masked = PROTECTED.sub(hide, text)
+    return masked, lambda value: re.sub('\ue000(\\d+)\ue001', lambda match: saved[int(match.group(1))], value)
+
+
 def add_wikilinks(ability_description):
-    extra_effect_blocks = []
-    def mask_extra_effect(match):
-        extra_effect_blocks.append(match.group(0))
-        return f"__EXTRA_EFFECT_{len(extra_effect_blocks)-1}__"
-    masked_desc = re.sub(r'\{LINK#N.*?\}.*?\{/LINK\}', mask_extra_effect, ability_description)
+    desc = ability_description
+    for pattern in KEYWORD_PATTERNS:
+        masked, restore = mask(desc)
+        desc = restore(pattern.sub(lambda match: f'[[{match.group(1)}]]', masked, count=1))
+    return desc
 
-    for keyword in LINK_KEYWORDS:
-        pattern = r'(?<!\[\[)\b(' + re.escape(keyword) + r')(\b|(?=s))(?!\]\])'
-        masked_desc = re.sub(pattern, r'[[\1]]', masked_desc, count=1, flags=re.IGNORECASE)
 
-    def unmask_extra_effect(match):
-        idx = int(match.group(1))
-        return extra_effect_blocks[idx]
-    result = re.sub(r'__EXTRA_EFFECT_(\d+)__', unmask_extra_effect, masked_desc)
-    return result
+def link_tags(desc, linked):
+    '''Turns the game's {LINK#S/P/T<id>}Name{/LINK} references to talents and constellations into wiki links.'''
+    def replace(match):
+        kind, ref, text = match.groups()
+        target = TAG_TITLES[kind].get(int(ref))
+        # Quotes and commas inside the tag ("Plan to Get Paid,") stay outside the link.
+        lead, core, tail = re.fullmatch(r'(["\s]*)(.*?)(["\s,.;:]*)', text, re.S).groups()
+        if not target or target in linked or not core:
+            return text
+        linked.add(target)
+        return f'{lead}[[{target}]]{tail}' if core == target else f'{lead}[[{target}|{core}]]{tail}'
+    return LINK_TAG.sub(replace, desc)
+
+
+def link_name(desc, name, linked, quoted):
+    '''Links the first mention of a talent name, as a whole word or only inside quotes ("Name" or "Name,").'''
+    if not name or name in linked:
+        return desc
+    escaped = re.escape(name)
+    pattern = rf'(?<=")({escaped})(?=[,.]?")' if quoted else rf'(?<![\w\[])({escaped})(?![\w\]])'
+    masked, restore = mask(desc)
+    masked, count = re.subn(pattern, lambda match: f'[[{match.group(1)}]]', masked, count=1)
+    if count:
+        linked.add(name)
+    return restore(masked)
+
+
+def link_description(desc, title, unquoted=()):
+    '''Wiki-links a talent or constellation description: the game's references to other talents, the given talent
+    names, quoted names of this character's other talents, then LINK_KEYWORDS. Each page is linked once, never itself.'''
+    linked = {title}
+    desc = link_tags(desc, linked)
+    for name in unquoted:
+        desc = link_name(desc, name, linked, quoted=False)
+    for name in own_titles:
+        desc = link_name(desc, name, linked, quoted=True)
+    return parse_hyperlink(add_wikilinks(desc))
 
 
 def parse_skill(id, ver, type = None, ability_dict = None, scaling = '', advanced = ''):        
@@ -273,19 +343,11 @@ def parse_skill(id, ver, type = None, ability_dict = None, scaling = '', advance
             
             ol_text = gen_ol(talentname)
             vo_text = '==Voice-Overs==\n{{Talent VO}}\n\n'
-                
-            for checktype, ability in ability_dict.items():
-                if checktype == type:
-                    continue
-                
-                if ability in desc:
-                    desc = desc.replace(ability, f'[[{ability}]]', 1)
                     
             # "Pneuma-aligned", or "Pneuma- or Ousia-aligned" for attacks that use either.
             arkhe = ';'.join(dict.fromkeys(re.findall(r'\b(Pneuma|Ousia)-(?:aligned|\s+or\b)', desc)))
             
-            desc = add_wikilinks(desc)
-            desc = parse_hyperlink(desc)
+            desc = link_description(desc, talentname, [ability for checktype, ability in ability_dict.items() if checktype != type])
             
             # talent note
             passive_effect_wikitext = ''
@@ -397,16 +459,8 @@ def parse_passive(id, ver, type = None, ability_dict = None, advanced = ''):
             if files:
                 icon = block['Icon']
                 processIcon(icon, 'Talent', f'Talent {name}', f'{character} Talent Icons')
-                
-            for checktype, ability in ability_dict.items():
-                if checktype == type:
-                    continue
-                
-                if ability in desc:
-                    desc = desc.replace(ability, f'[[{ability}]]', 1)
     
-    desc = add_wikilinks(desc)
-    desc = parse_hyperlink(desc)
+    desc = link_description(desc, name, [ability for checktype, ability in ability_dict.items() if checktype != type])
 
     page_content = f"""{pageinfo(name)}
 {{{{Talent Infobox
@@ -454,27 +508,15 @@ def parse_cons(id, ver, ability_dict, advanced = ''):
             utility1 = ''
             utility2 = ''
             
-            if ability_dict['Normal Attack'] in desc:
-                desc = desc.replace(ability_dict['Normal Attack'], f'[[{ability_dict["Normal Attack"]}]]', 1)
-                if rank in (3, 5):
-                    utility2 = 'Normal Attack Level Increase'
-                
-            if ability_dict['Elemental Skill'] in desc:
-                desc = desc.replace(ability_dict['Elemental Skill'], f'[[{ability_dict["Elemental Skill"]}]]', 1)
-                if rank in (3, 5):
-                    utility2 = 'Elemental Skill Level Increase'
-            
-            if ability_dict['Elemental Burst'] in desc:
-                desc = desc.replace(ability_dict['Elemental Burst'], f'[[{ability_dict["Elemental Burst"]}]]', 1)
-                if rank in (3, 5):
-                    utility2 = 'Elemental Burst Level Increase'
+            for checktype in ('Normal Attack', 'Elemental Skill', 'Elemental Burst'):
+                if ability_dict[checktype] in desc and rank in (3, 5):
+                    utility2 = f'{checktype} Level Increase'
                 
             if utility2:
                 utility1 = 'Talent Level Increase'
             utility = utility_lines([u for u in (utility1, utility2) if u] + utilities(desc, 'C'))
     
-    desc = add_wikilinks(desc)
-    desc = parse_hyperlink(desc)
+    desc = link_description(desc, name, ability_dict.values())
     constellation_advanced = f'\n{advanced_section(advanced)}' if advanced else ''
     
     page_content = f"""{pageinfo(name)}
@@ -593,6 +635,11 @@ if char_id != "None":
         '1st Ascension Passive': get_passive_name(passive_list[0][0](skilldepot)),
         '4th Ascension Passive': get_passive_name(passive_list[1][0](skilldepot)),
     }
+    own_titles[:] = dict.fromkeys(
+        [get_skill_name(ability[0](skilldepot)) for ability in ability_list]
+        + [passive_title(get_passive_name(passive[0](skilldepot))) for passive in passive_list]
+        + [get_cons_name(cons[0](skilldepot)) for cons in cons_list]
+    )
     
     from pathlib import Path
     from talentEffects import load_talent_configs, talent_effects
