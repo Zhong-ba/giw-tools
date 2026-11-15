@@ -797,6 +797,127 @@ class ToolTests(unittest.TestCase):
                 maps[f'TextMap_Medium{lang}.json'] = {'101': '<color=#FF9999FF>Example</color>'}
         return maps
 
+    def test_history_lists_all_pages_and_rejects_repeated_pages(self):
+        import setupData
+
+        first = [{'commit': f'{number:040x}'} for number in range(100)]
+        last = [{'commit': f'{100:040x}'}]
+        with patch.object(setupData, 'list_revisions', side_effect=[first, last]) as fetch:
+            self.assertEqual(len(setupData.all_revisions('dimbreath')), 101)
+            self.assertEqual(fetch.call_args_list[1].args, ('dimbreath', 100, 2))
+        with patch.object(setupData, 'list_revisions', side_effect=[first, first]):
+            with self.assertRaisesRegex(ValueError, 'duplicate commits'):
+                setupData.all_revisions('dimbreath')
+
+    def test_history_prepares_both_sources_and_skips_empty_commits(self):
+        import setupData
+        from dataSource import SOURCES, data_root, load_config
+
+        histories = {}
+        upstreams = {}
+        for source in ('dimbreath', 'gura'):
+            upstream, commit = self.make_repository(source, {'README.json': {}})
+            upstreams[source] = upstream
+            head = lambda: subprocess.run(['git', '-C', str(upstream), 'rev-parse', 'HEAD'],
+                                          check=True, capture_output=True, text=True).stdout.strip()
+            empty = head()
+            files = self.excel_fixture(
+                [{'id': 1, 'nameTextMapHash': 101}], self.dimbreath_maps(),
+                {'BinOutput/Monster/Aahigaru_Male_01_25050301.json': {'combat': {'property': {'weight': 50}}}})
+            for relative, value in files.items():
+                target = upstream / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                self.write_json(target, value)
+            commit('Old data')
+            old = head()
+            self.write_json(upstream / 'ExcelBinOutput' / 'AvatarExcelConfigData.json',
+                            [{'id': 2, 'nameTextMapHash': 101}])
+            self.write_json(upstream / 'BinOutput' / 'Monster' / 'Aahigaru_Male_01_25050301.json',
+                            {'combat': {'property': {'weight': 60}}})
+            commit('New data')
+            histories[source] = [
+                {'commit': sha, 'title': title, 'date': date}
+                for sha, title, date in ((head(), 'New data', '2026-03-01T00:00:00Z'),
+                                         (old, 'Old data', '2026-02-01T00:00:00Z'),
+                                         (empty, 'Initial', '2026-01-01T00:00:00Z'))]
+
+        path = self.work / 'scriptconfig.json'
+        config = dict(load_config(), DataSource='remote')
+        self.write_json(path, config)
+        with patch.dict(SOURCES['dimbreath'], url=upstreams['dimbreath'].as_uri()), \
+                patch.dict(SOURCES['gura'], url=upstreams['gura'].as_uri()), \
+                patch.object(setupData, 'all_revisions', side_effect=lambda source: histories[source]), \
+                patch.object(setupData.shutil, 'disk_usage', return_value=types.SimpleNamespace(free=10 * 1024 ** 3)):
+            setupData.prepare_remote(config, path, keep_history=True)
+        root = data_root(path)
+        for source, folder in (('dimbreath', 'datasets'), ('gura', 'binoutput')):
+            markers = list((root / SOURCES[source]['cache'] / folder).glob('*/.prepared.json'))
+            self.assertEqual({json.loads(marker.read_text())['commit'] for marker in markers},
+                             {histories[source][0]['commit'], histories[source][1]['commit']})
+        self.assertIn('does not contain the required', self.stdout.getvalue())
+        old_commit = histories['dimbreath'][1]['commit']
+        old_directory = next((root / SOURCES['dimbreath']['cache'] / 'datasets').glob(f'{old_commit}-*'))
+        with patch.object(setupData.shutil, 'disk_usage',
+                          side_effect=lambda _: types.SimpleNamespace(free=0 if old_directory.exists() else 100)):
+            self.assertTrue(setupData.history_space(path, {('excel', 'dimbreath', old_commit): 1}, 2, 100))
+        self.assertFalse(old_directory.exists())
+        repository = root / SOURCES['dimbreath']['cache'] / 'repository.git'
+        worktrees = setupData.git(repository, 'worktree', 'list', '--porcelain', capture=True)
+        self.assertNotIn(str(old_directory), worktrees)
+
+    def test_history_prunes_oldest_without_deleting_active_or_reference(self):
+        import setupData
+        from dataSource import binoutput_path, data_root, excel_dataset_path
+
+        path = self.work / 'scriptconfig.json'
+        root = data_root(path)
+        root.mkdir()
+        pipeline = setupData.pipeline_version()
+        excel = [{'source': 'dimbreath', 'commit': char * 40, 'pipeline': pipeline} for char in 'abc']
+        bins = [{'source': 'dimbreath', 'commit': char * 40, 'layout': setupData.BINOUTPUT_LAYOUT}
+                for char in 'de']
+        for revision in excel + bins:
+            directory = (excel_dataset_path(path, revision) if 'pipeline' in revision
+                         else binoutput_path(path, revision))
+            directory.mkdir(parents=True)
+            self.write_json(directory / '.prepared.json', revision)
+        self.write_json(root / 'ready.json', {'excel': excel[2], 'binoutput': bins[0]})
+        self.write_json(binoutput_path(path, bins[0]) / '.keys.json', {'reference': bins[1]})
+        dates = {('excel', 'dimbreath', item['commit']): index + 1 for index, item in enumerate(excel)}
+        dates.update({('binoutput', 'dimbreath', bins[0]['commit']): 3,
+                      ('binoutput', 'dimbreath', bins[1]['commit']): 0})
+        oldest = excel_dataset_path(path, excel[0])
+
+        def disk_usage(_path):
+            return types.SimpleNamespace(free=0 if oldest.exists() else 100)
+
+        def remove(_repository, *args, **_kwargs):
+            shutil.rmtree(args[-1])
+
+        with patch.object(setupData.shutil, 'disk_usage', side_effect=disk_usage), \
+                patch.object(setupData, 'git', side_effect=remove):
+            self.assertTrue(setupData.history_space(path, dates, 2.5, 100))
+        self.assertFalse(oldest.exists())
+        self.assertTrue(excel_dataset_path(path, excel[1]).exists())
+        self.assertTrue(excel_dataset_path(path, excel[2]).exists())
+        self.assertTrue(binoutput_path(path, bins[1]).exists())
+        with patch.object(setupData.shutil, 'disk_usage', return_value=types.SimpleNamespace(free=0)):
+            self.assertFalse(setupData.history_space(path, dates, 1, 100))
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX disk reservation and locks')
+    def test_history_lock_and_reservation(self):
+        import setupData
+        from dataSource import data_root
+
+        path = self.work / 'scriptconfig.json'
+        with setupData.history_lock(path, exclusive=False):
+            with self.assertRaisesRegex(OSError, 'Stop the hosted backend'):
+                with setupData.history_lock(path, exclusive=True):
+                    self.fail('Exclusive maintenance lock should not be available.')
+        with setupData.history_lock(path, exclusive=True), setupData.history_reservation(path, 4096):
+            self.assertEqual((data_root(path) / 'history-reserve').stat().st_size, 4096)
+        self.assertFalse((data_root(path) / 'history-reserve').exists())
+
     def test_keep_versions_prepares_previous_version_and_prunes(self):
         import setupData
         from dataSource import SOURCES, data_root, load_config

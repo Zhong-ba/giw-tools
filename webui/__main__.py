@@ -1,4 +1,5 @@
 import argparse
+from contextlib import nullcontext
 import os
 
 import uvicorn
@@ -13,7 +14,14 @@ def main() -> None:
     args = parser.parse_args()
     if args.hosted:
         os.environ['PAINMELO_HOSTED'] = '1'
-    uvicorn.run('webui.app:app', host=args.host, port=args.port, proxy_headers=args.hosted)
+    if os.environ.get('PAINMELO_HOSTED', '').lower() in ('1', 'true', 'yes'):
+        from dataSource import config_path
+        from setupData import history_lock
+        lock = history_lock(config_path(), exclusive=False)
+    else:
+        lock = nullcontext()
+    with lock:
+        uvicorn.run('webui.app:app', host=args.host, port=args.port, proxy_headers=args.hosted)
 
 
 if __name__ == '__main__':

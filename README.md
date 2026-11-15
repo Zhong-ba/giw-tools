@@ -400,28 +400,38 @@ secrets. Everything personal stays with each visitor:
   in `localStorage`, only when **Remember Login** is ticked). Each visitor logs in
   with their own bot password; the backend only relays MediaWiki API calls for the
   session and refuses non-public wiki addresses.
-- **Dataset:** the server keeps only the current and previous game versions, and
-  visitors pick between them. They cannot run setup, change sources, or change
-  server settings. For any other revision, run Painmelo locally (see above): local
-  mode can download and prepare any revision. A browser whose picked revision has
-  since been removed falls back to the default and says so.
+- **Dataset:** visitors pick from the revisions prepared on the server. They cannot
+  run setup, change sources, or change server settings. Older revisions may be
+  removed to make space. A browser whose picked revision has been removed falls
+  back to the default and says so. Run Painmelo locally for other revisions.
 
 Backend (any Docker host with a persistent volume of about 15 GB, and about 8 GB of RAM for the TextMaps):
 ```bash
 docker build -t painmelo .
 docker run -d -p 8000:8000 -v painmelo-data:/data \
   -e PAINMELO_CORS_ORIGINS=https://your-site.vercel.app painmelo
-docker exec <container> python setupData.py --keep-versions 2   # prepare (and later update) the dataset
+docker stop <container>
+docker run --rm --entrypoint python -v painmelo-data:/data painmelo -u setupData.py --all-revisions
+docker start <container>
 ```
-The first start writes a remote-data profile to `/data/scriptconfig.json`; edit it
-to choose sources, then rerun setup. `--keep-versions 2` prepares the latest build
-plus the newest build of the previous game version (found from DimbreathBot's
-`CNRELWin<major>.<minor>` commit titles), then deletes every other downloaded
-dataset, including copies left by older preprocessing. Only the latest BinOutput
-(and the readable copy it was deobfuscated with) is kept. Run the same command
-after each game update; the oldest version drops off automatically. This needs
-about 7 GB, plus about 0.5 GB of git cache per new version; deleting
-`.data/<source>/repository.git` resets that cache (setup downloads it again).
+The first start writes a remote-data profile to `/data/scriptconfig.json`.
+`--all-revisions` requires both sources to follow their latest revision. It prepares
+available Excel/TextMap and BinOutput history, newest first, skipping commits without
+the required data. Stop the backend before running it: pruning must not remove data
+used by jobs. Hosted servers launched with `python -m webui --hosted` hold a shared
+lock that prevents historical maintenance from running concurrently.
+
+The command reserves 5 GiB while running (`--reserve-gb` changes this), and needs
+another 4 GiB of staging space. It removes known older prepared snapshots when needed,
+but protects the active dataset and BinOutput references. If no eligible older
+snapshot can make enough space, it stops preparing older history. A revision larger
+than the staging space can still fail: the reserved space is released on exit.
+Interrupted setup may leave `setup.lock` or `history-reserve` in `/data/.data`;
+check that no setup process is running before removing either file. Git caches also
+grow and are not pruned by this option. Historical BinOutput key recovery uses the
+latest readable reference; inspect its warnings for older revisions. Rerun the
+maintenance command after each update.
+
 Without Docker, run `python -m webui --hosted --host 0.0.0.0` behind an HTTPS
 reverse proxy.
 

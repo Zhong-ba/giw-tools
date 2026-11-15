@@ -744,7 +744,7 @@ function HostedDatasetPicker({ dataset, onChanged }: { dataset: Dataset | null; 
     </div>
     <div className="source-actions">
       {choice.length > 0 && <button className="button secondary" onClick={() => pick([])}><RotateCcw size={15} /> Use Default</button>}
-      {error ? <span className="field-error" role="alert">{error}</span> : <span className="subtle">This site keeps the current and previous game versions. For other revisions, <a href={LOCAL_SETUP_URL} target="_blank" rel="noreferrer">run Painmelo on your own PC</a>.</span>}
+      {error ? <span className="field-error" role="alert">{error}</span> : <span className="subtle">Available revisions depend on server storage; older revisions may be removed. For other revisions, <a href={LOCAL_SETUP_URL} target="_blank" rel="noreferrer">run Painmelo on your own PC</a>.</span>}
     </div>
   </div>
 }

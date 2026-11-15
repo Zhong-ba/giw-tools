@@ -1,4 +1,6 @@
 import argparse
+from contextlib import contextmanager
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -181,9 +183,9 @@ def update_repository(path, source, revision=LATEST):
     return repository, commit
 
 
-def list_revisions(source, limit=30):
+def list_revisions(source, limit=30, page=1):
     """Recent commits of a source's branch from the hosting API: [{'commit', 'title', 'date'}]."""
-    request = urllib.request.Request(SOURCES[source]['commits_api'].format(limit=limit),
+    request = urllib.request.Request(SOURCES[source]['commits_api'].format(limit=limit) + f'&page={page}',
                                      headers={'User-Agent': 'genshin-wiki-tools', 'Accept': 'application/json'})
     with urllib.request.urlopen(request, timeout=20) as response:
         rows = json.load(response)
@@ -195,6 +197,105 @@ def list_revisions(source, limit=30):
             commit, message, date = row['id'], row['message'], row['committed_date']
         revisions.append({'commit': commit, 'title': message.strip().splitlines()[0].strip("'"), 'date': date})
     return revisions
+
+
+def all_revisions(source):
+    """List the entire branch history, newest first."""
+    page = 1
+    result = []
+    seen = set()
+    while True:
+        rows = list_revisions(source, 100, page)
+        commits = {row['commit'] for row in rows}
+        if seen.intersection(commits) or len(commits) != len(rows):
+            raise ValueError(f'The {SOURCES[source]["label"]} revision listing contains duplicate commits.')
+        seen.update(commits)
+        result.extend(rows)
+        if len(rows) < 100:
+            return result
+        page += 1
+
+
+@contextmanager
+def history_lock(path, exclusive):
+    """Prevent hosted servers and historical maintenance from using the data simultaneously."""
+    if os.name != 'posix':
+        if exclusive:
+            raise OSError('Historical maintenance requires POSIX file locking.')
+        yield
+        return
+    import fcntl
+    root = data_root(path)
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / 'history.lock').open('a') as file:
+        try:
+            fcntl.flock(file.fileno(), (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise OSError('Stop the hosted backend before historical maintenance, and wait for maintenance to finish '
+                          'before starting it again.') from error
+        try:
+            yield
+        finally:
+            fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def history_reservation(path, size):
+    """Reserve disk space while historical datasets are being prepared."""
+    root = data_root(path)
+    root.mkdir(parents=True, exist_ok=True)
+    if not hasattr(os, 'posix_fallocate'):
+        raise OSError('Historical setup requires a filesystem supporting posix_fallocate.')
+    reservation = root / 'history-reserve'
+    with reservation.open('xb') as file:
+        try:
+            os.posix_fallocate(file.fileno(), 0, size)
+            yield
+        finally:
+            reservation.unlink()
+
+
+def history_space(path, dates, before, minimum):
+    """Make staging space by removing only known older, unprotected worktrees."""
+    root = data_root(path)
+    protected = set()
+    ready = root / 'ready.json'
+    if ready.is_file():
+        with ready.open(encoding='utf-8') as file:
+            active = json.load(file)
+        protected.add(excel_dataset_path(path, active['excel']))
+        protected.add(binoutput_path(path, active['binoutput']))
+    candidates = []
+    for source in SOURCES:
+        cache = cache_path(path, source)
+        for folder, role, locate in (
+            ('datasets', 'excel', excel_dataset_path),
+            ('binoutput', 'binoutput', binoutput_path),
+        ):
+            for marker in (cache / folder).glob('*/.prepared.json'):
+                directory = marker.parent
+                if directory.is_symlink():
+                    continue
+                with marker.open(encoding='utf-8') as file:
+                    revision = json.load(file)
+                if revision.get('source') != source or locate(path, revision) != directory:
+                    raise ValueError(f'Invalid dataset metadata in {marker}')
+                date = dates.get((role, source, revision['commit']))
+                if date is not None and date < before:
+                    candidates.append((date, source, directory))
+                keys = directory / '.keys.json'
+                if keys.is_file():
+                    with keys.open(encoding='utf-8') as file:
+                        protected.add(binoutput_path(path, json.load(file)['reference']))
+    for _, source, directory in sorted(candidates):
+        if shutil.disk_usage(root).free >= minimum:
+            return True
+        if directory in protected:
+            continue
+        print(f'Removing older dataset {directory.relative_to(root)} to make space.', flush=True)
+        repository = cache_path(path, source) / 'repository.git'
+        git(repository, 'worktree', 'remove', '--force', directory)
+    return shutil.disk_usage(root).free >= minimum
 
 
 VERSION_TITLE = re.compile(r'REL\D*(\d+)\.(\d+)')
@@ -319,7 +420,7 @@ def deobfuscate(path, repositories, directory, dataset):
     })
 
 
-def prepare_remote(config, path, keep_versions=None):
+def prepare_remote(config, path, keep_versions=None, keep_history=False):
     selected = selected_sources(config)
     root = data_root(path)
     root.mkdir(parents=True, exist_ok=True)
@@ -335,6 +436,18 @@ def prepare_remote(config, path, keep_versions=None):
 
     try:
         revisions = selected_revisions(config)
+        history = {}
+        dates = {}
+        if keep_history:
+            if any(value != LATEST for value in revisions.values()):
+                raise ValueError('Historical setup requires both sources to follow their latest revision.')
+            for role, source in selected.items():
+                history[role] = all_revisions(source)
+                for revision in history[role]:
+                    date = datetime.fromisoformat(revision['date'].replace('Z', '+00:00')).timestamp()
+                    dates[(role, source, revision['commit'])] = date
+            if not history_space(path, dates, float('inf'), 4 * 1024 ** 3):
+                raise OSError('Not enough disk space to prepare the current dataset while preserving the reserve.')
         for role, title in (('excel', 'Excel and TextMap'), ('binoutput', 'BinOutput')):
             pinned = '' if revisions[role] == LATEST else f' (pinned to {revisions[role][:8]})'
             print(f'{title} source: {SOURCES[selected[role]]["label"]}{pinned}', flush=True)
@@ -365,6 +478,8 @@ def prepare_remote(config, path, keep_versions=None):
                 repository, commit = update_repository(path, selected['excel'], older['commit'])
                 kept.append(prepare_excel(config, path, selected['excel'], repository, commit)[1])
             prune(path, kept, binoutput_revision)
+        if keep_history:
+            prepare_history(config, path, selected, history, dates, repositories, dataset)
         return dataset
     finally:
         lock.unlink()
@@ -384,6 +499,42 @@ def prepare_excel(config, path, source, repository, commit):
         preprocess(dict(config, RepoPath=str(dataset)))
         write_json(dataset / '.prepared.json', excel_revision)
     return dataset, excel_revision
+
+
+def prepare_history(config, path, selected, history, dates, repositories, dataset):
+    """Prepare historical snapshots newest first; stop rather than evict a newer one."""
+    entries = [
+        (dates[(role, selected[role], revision['commit'])], role, revision)
+        for role, rows in history.items() for revision in rows
+    ]
+    for date, role, revision in sorted(entries, key=lambda item: item[0], reverse=True):
+        source, commit = selected[role], revision['commit']
+        metadata = {'source': source, 'commit': commit}
+        if role == 'excel':
+            metadata['pipeline'] = pipeline_version()
+            directory = excel_dataset_path(path, metadata)
+        else:
+            metadata['layout'] = BINOUTPUT_LAYOUT
+            directory = binoutput_path(path, metadata)
+        if is_prepared(directory, metadata):
+            continue
+        if not history_space(path, dates, date, 4 * 1024 ** 3):
+            print('Stopped historical preparation: no older removable datasets can provide enough staging space.',
+                  flush=True)
+            return
+        print(f'Preparing {role} revision {commit[:8]}: {revision["title"]}', flush=True)
+        repository, commit = update_repository(path, source, commit)
+        required = ('ExcelBinOutput', 'TextMap') if role == 'excel' else ('BinOutput/Monster',)
+        existing = set(git(repository, 'ls-tree', '--name-only', commit, '--', *required, capture=True).splitlines())
+        if not set(required).issubset(existing):
+            print(f'Skipping {commit[:8]}: it does not contain the required {role} data.', flush=True)
+            continue
+        if role == 'excel':
+            prepare_excel(config, path, source, repository, commit)
+        else:
+            prepare_binoutput(repository, directory, metadata)
+            deobfuscate(path, repositories, directory, dataset)
+            write_json(directory / '.prepared.json', metadata)
 
 
 def prune(path, excel_revisions, binoutput_revision):
@@ -408,7 +559,7 @@ def prune(path, excel_revisions, binoutput_revision):
     print(f'Freed {freed / 1024 ** 3:.2f} GB.', flush=True)
 
 
-def prepare(path=None, keep_versions=None):
+def prepare(path=None, keep_versions=None, keep_history=False, reserve_gb=5):
     path = Path(path).resolve() if path is not None else config_path()
     config = load_config(path, require_prepared=False)
     if shutil.which('node') is None:
@@ -416,10 +567,18 @@ def prepare(path=None, keep_versions=None):
     if is_remote(config):
         if shutil.which('git') is None:
             raise FileNotFoundError('Git is required to download game data.')
-        dataset = prepare_remote(config, path, keep_versions)
+        if keep_history:
+            if keep_versions is not None:
+                raise ValueError('Choose either --keep-versions or --all-revisions.')
+            if reserve_gb <= 0:
+                raise ValueError('The disk reserve must be greater than zero.')
+            with history_lock(path, exclusive=True), history_reservation(path, int(reserve_gb * 1024 ** 3)):
+                dataset = prepare_remote(config, path, keep_history=True)
+        else:
+            dataset = prepare_remote(config, path, keep_versions)
     else:
-        if keep_versions is not None:
-            raise ValueError('--keep-versions needs downloaded data (DataSource "remote").')
+        if keep_versions is not None or keep_history:
+            raise ValueError('Revision retention needs downloaded data (DataSource "remote").')
         dataset = preprocess(config)
     print(f'Dataset ready: {dataset}', flush=True)
     return dataset
@@ -433,6 +592,10 @@ def main():
     parser.add_argument('--keep-versions', type=int, metavar='N',
                         help='Also prepare the newest build of each of the N-1 previous game versions, then delete '
                              'every other downloaded dataset (for hosted servers).')
+    parser.add_argument('--all-revisions', action='store_true',
+                        help='Prepare historical revisions of both sources, removing older snapshots if space is needed.')
+    parser.add_argument('--reserve-gb', type=int, default=5, metavar='N',
+                        help='Disk space in GiB to reserve during historical setup (default: 5).')
     args = parser.parse_args()
     if args.keep_versions is not None and args.keep_versions < 1:
         parser.error('--keep-versions must be at least 1.')
@@ -441,7 +604,7 @@ def main():
             for revision in list_revisions(args.list_revisions):
                 print(f'{revision["commit"]}  {revision["date"][:10]}  {revision["title"]}')
             return
-        prepare(args.config, args.keep_versions)
+        prepare(args.config, args.keep_versions, args.all_revisions, args.reserve_gb)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f'Setup failed: {error}\n')
 
