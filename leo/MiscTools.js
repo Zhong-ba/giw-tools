@@ -6,6 +6,18 @@ const stringify = require("json-stringify-pretty-compact");
 const CONFIG = require("./config");
 
 /**
+ * Loads a mapped table that only some data sources provide (for example, GuraFoundation has no QuestExcelConfigData).
+ */
+function optionalRequire(name) {
+  try {
+    return require(join(OPTIONS.input_dir, `${name}.json`));
+  } catch (error) {
+    if (error.code !== "MODULE_NOT_FOUND") throw error;
+    return null;
+  }
+}
+
+/**
  * Options set by command line arguments and defaults.
  */
 const OPTIONS = {
@@ -44,7 +56,7 @@ const EXCELS = {
   MainQuestExcelConfigData: require(OPTIONS.input_dir + "/MainQuestExcelConfigData.json"),
   MonsterDescribeExcelConfigData: require(OPTIONS.input_dir + "/MonsterDescribeExcelConfigData.json"),
   ProudSkillExcelConfigData: require(OPTIONS.input_dir + "/ProudSkillExcelConfigData.json"),
-  QuestExcelConfigData: require(OPTIONS.input_dir + "/QuestExcelConfigData.json"),
+  QuestExcelConfigData: optionalRequire("QuestExcelConfigData"),
   TowerFloorExcelConfigData: require(OPTIONS.input_dir + "/TowerFloorExcelConfigData.json"),
   TowerLevelExcelConfigData: require(OPTIONS.input_dir + "/TowerLevelExcelConfigData.json"),
   TowerScheduleExcelConfigData: require(OPTIONS.input_dir + "/TowerScheduleExcelConfigData.json"),
@@ -328,6 +340,7 @@ function getQuests(id) {
  * @returns Quest with QuestExcelConfigData and DialogExcelConfigData added.
  */
 function mapQuest(quest) {
+  if (!EXCELS.QuestExcelConfigData) throw new Error("This data source has no QuestExcelConfigData; quest tools need DimbreathBot Excel data.");
   let scenes = EXCELS.QuestExcelConfigData.filter(scene => scene.MainId == quest.Id);
   quest.Scenes = [];
   scenes.forEach(scene => { // `^${scene.SubId}[0-9]{4}$`
@@ -551,10 +564,99 @@ function abilitiesToWikitext(abilities) {
         }
       })
       result += "}}"
-      return `==${talent.name}==\n${result}`;
+      return `==${talent.name}==\n${formatScaling(result)}`;
     }).join("\n")}`;
   }).join("\n");
   return abilities_result;
+}
+
+const NUMBER = String.raw`\d+(?:\.\d+)?`;
+// Repeated hits share one value ("34.57+34.57 DEF"); differing parts can be a flat bonus ("270 + 2.8 Max HP").
+const STAT_VALUE = String.raw`(${NUMBER})(?:\+\1)*(?:/${NUMBER})*`;
+const SCALING_UNITS = [
+  [new RegExp(`^${NUMBER}(?:[+/]${NUMBER})*$`), "%"],
+  [new RegExp(`^${STAT_VALUE}MaxHP$`), "%Max HP"],
+  [new RegExp(`^${STAT_VALUE}CurrentHP$`), "%Current HP"],
+  [new RegExp(`^${STAT_VALUE}DEF$`), "%DEF"],
+  [new RegExp(`^${STAT_VALUE}ATK$`), "%ATK"],
+  [new RegExp(`^${STAT_VALUE}ElementalMastery$`), "%EM"],
+];
+// The header names the stat, so it is dropped from the values.
+const UNIT_STATS = { "%Max HP": /\s*Max HP/g, "%Current HP": /\s*Current HP/g, "%DEF": /\s*DEF/g, "%ATK": /\s*ATK/g, "%EM": /\s*Elemental Mastery/g };
+// "DMG" that names the damage itself, not e.g. "DMG Bonus" or "DMG Absorption".
+const DAMAGE_TITLE = /\bDMG(?=$| \(|:)/;
+const MULTIPLIER = /[×*]\d+(?:\.\d+)?/g;
+const OPERATOR = /(?<=\S)\s*([+×*])\s*(?=\S)/g;
+// In unlabelled columns, stat percentages keep their stat and get a percent sign, as in game: "0.8% Max HP + 77".
+const STAT_PERCENT = new RegExp(String.raw`(${NUMBER}) ?(Max HP|Current HP|DEF|ATK|Elemental Mastery)\b(?! DMG)`, "g");
+
+/**
+ * Gets the shared unit of a column's values.
+ * @param {String[]} values Values of one Talent Scaling column.
+ * @returns The unit, or null for mixed, flat-bonus, or other scalings.
+ */
+function scalingUnit(values) {
+  const units = new Set(values.map(value => {
+    const compact = value.replace(/ /g, "").replace(MULTIPLIER, "");
+    return SCALING_UNITS.find(([pattern]) => pattern.test(compact))?.[1] ?? null;
+  }));
+  return units.size == 1 ? [...units][0] : null;
+}
+
+/**
+ * Labels Talent Scaling titles with their scaling and normalizes the values.
+ * @param {String} template Talent Scaling template.
+ * @returns The formatted template.
+ */
+function formatScaling(template) {
+  const lines = template.split("\n");
+  const valueOf = line => line.slice(line.indexOf("=") + 1);
+  const fields = new Map();
+  lines.forEach((line, index) => { if (line.startsWith("|")) fields.set(line.slice(1, line.indexOf("=")), index); });
+  let order = valueOf(lines[fields.get("order")]).split(",");
+  let titles = valueOf(lines[fields.get("titles")]).split(",");
+  const values = {};
+  const rows = {};
+  for (const [name, index] of fields) {
+    if (["levels", "order", "titles"].includes(name)) continue;
+    const value = valueOf(lines[index]);
+    const key = name.replace(/_\d+$/, "");
+    (values[key] ??= []).push(value);
+    (rows[key] ??= []).push(index);
+    lines[index] = `|${name}=${value.replace(OPERATOR, " $1 ")}`;
+  }
+  const labelled = new Set();
+  if (order.length == titles.length) {
+    // Titles containing commas ("Bloom, Hyperbloom, and Burgeon DMG Increase") are split in both lists; rejoin them.
+    const merged = [];
+    for (let i = 0; i < order.length;) {
+      let end = order.length;
+      while (end > i + 1 && !(order.slice(i, end).join(",") in values)) end--;
+      merged.push([order.slice(i, end).join(","), titles.slice(i, end).join(",")]);
+      i = end;
+    }
+    order = merged.map(([key]) => key);
+    titles = merged.map(([, title]) => title);
+    order.forEach((key, i) => {
+      let unit = key in values ? scalingUnit(values[key]) : null;
+      // Plain percentages are only labelled on damage titles; stat scalings are labelled on any title.
+      if (unit == "%" && !DAMAGE_TITLE.test(titles[i])) unit = null;
+      if (unit) titles[i] = `${titles[i]} (${unit})`;
+      if (unit in UNIT_STATS) {
+        labelled.add(key);
+        for (const index of rows[key]) lines[index] = lines[index].replace(UNIT_STATS[unit], "");
+      }
+    });
+    lines[fields.get("titles")] = `|titles=${titles.join(",")}`;
+  }
+  for (const [key, indexes] of Object.entries(rows)) {
+    if (labelled.has(key)) continue;
+    for (const index of indexes) {
+      const split = lines[index].indexOf("=") + 1;
+      lines[index] = lines[index].slice(0, split) + lines[index].slice(split).replace(STAT_PERCENT, "$1% $2");
+    }
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -701,7 +803,8 @@ function getCharacter(mode, characterId) {
     case "abilities": {
       if (typeof EXCELS.AvatarExcelConfigData[0].NameTextMapHash == "object") return console.log("Must only map one language.")
       if (character) {
-        res = EXCELS.AvatarExcelConfigData.filter(a => character.some(b => a.NameTextMapHash.includes(b.NameTextMapHash))).map(avatar => {
+        // An Id selects that avatar only; names also match same-named test avatars.
+        res = (typeof characterId == "number" ? character : EXCELS.AvatarExcelConfigData.filter(a => character.some(b => a.NameTextMapHash.includes(b.NameTextMapHash)))).map(avatar => {
           let result = {}
           if (avatar.CandSkillDepotIds?.length > 0) {
             if (avatar.BodyType == "BODY_GIRL") result.name = "Lumine";
@@ -824,12 +927,16 @@ function getSpiralAbyss(scheduleId) {
       result += `Chamber ${c + 1}\n`;
       result += `Enemy Level: ${chamber.MonsterLevel + 1}\n`;
       result += `Target: ${chamber.Conds[0].TowerCondType == "TOWER_COND_CHALLENGE_LEFT_TIME_MORE_THAN"
-        ? "Remaining challenge time longer than " + chamber.Conds.map(cond => cond.IPPNLIOPKAJ[cond.IPPNLIOPKAJ.length - 1]).join("/") + " sec.\n"
-        : "Target defense progress greater than " + chamber.Conds.map(cond => cond.IPPNLIOPKAJ[cond.IPPNLIOPKAJ.length - 1]).join("/") + "%\n"}`;
+        ? "Remaining challenge time longer than " + chamber.Conds.map(cond => cond.ArgumentList[cond.ArgumentList.length - 1]).join("/") + " sec.\n"
+        : "Target defense progress greater than " + chamber.Conds.map(cond => cond.ArgumentList[cond.ArgumentList.length - 1]).join("/") + "%\n"}`;
+      // Newer chambers reference a monster preview instead of listing monsters in the Excel data.
+      const half = list => list
+        ? list.map(id => EXCELS.MonsterDescribeExcelConfigData.find(m => m.Id == id)?.NameTextMapHash || id).join("\n")
+        : `(Not in the Excel data; monster preview ${chamber.TowerMonsterPreview ?? "unknown"})`;
       result += `First Half\n`;
-      result += `${chamber.FirstMonsterList.map(id => EXCELS.MonsterDescribeExcelConfigData.find(m => m.Id == id)?.NameTextMapHash || id).join("\n")}\n`;
+      result += `${half(chamber.FirstMonsterList)}\n`;
       result += `Second Half\n`;
-      result += `${chamber.SecondMonsterList.map(id => EXCELS.MonsterDescribeExcelConfigData.find(m => m.Id == id)?.NameTextMapHash || id).join("\n")}\n`;
+      result += `${half(chamber.SecondMonsterList)}\n`;
     });
     result += "\n"
   })
@@ -852,9 +959,9 @@ function getTCGStages() {
       return a;
     }, undefined)
     return {
-      character: game?.MBJIAMCDJLJ,
+      character: game?.OppoPlayerNameTextMapHash,
       name: rewards.LevelNameTextMapHash,
-      intro: rewards.ILOGAIHBHNE,
+      intro: rewards.LevelDecTextMapHash,
       level: rewards.CondList.find(c => c.Type == "GCG_LEVEL")?.ParamList[0] || weekly,
       rewards: rewards.ChallengeRewardList.reduce((a, c) => {
         if (c.RewardId) a.push(c.RewardId);
@@ -862,7 +969,7 @@ function getTCGStages() {
       }, []),
       deck: {
         active: cards.CharacterList,
-        reserve: cards.WaitingCharacterList.reduce((a, c) => {
+        reserve: (cards.WaitingCharacterList || []).reduce((a, c) => {
           if (c.Id) a.push(c.Id);
           return a;
         }, []),

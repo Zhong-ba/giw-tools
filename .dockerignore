@@ -1,0 +1,10 @@
+.git
+.data
+.venv
+**/__pycache__
+**/node_modules
+frontend
+output
+archive
+scriptconfig.json
+leo/cmd.txt

@@ -4,6 +4,7 @@ const { existsSync, writeFileSync, readdirSync, rmdirSync, mkdirSync } = require
 const { join } = require("path");
 const stringify = require("json-stringify-pretty-compact");
 const CONFIG = require("./config");
+const { canonicalKey, tidyNumber } = require("./normalize");
 
 const LANGUAGES = ["EN"];
 const TEXTMAPS = {};
@@ -175,7 +176,7 @@ function mapArray(items, excel) {
     } else if (typeof item == "object") {
       return mapObject(item, excel);
     } else {
-      return item;
+      return tidyNumber(item);
     }
   })
 }
@@ -193,6 +194,7 @@ function mapObject(item, excel) {
   if (Array.isArray(item)) return mapArray(item, excel);
   let result = {};
   Object.entries(item).map(([prop, value]) => {
+    prop = canonicalKey(excel, prop, item);
     prop = prop.charAt(0).toUpperCase() + prop.slice(1)
     if (prop.indexOf("Hash") != -1) {
       let text = getText(value);
@@ -226,17 +228,17 @@ function mapObject(item, excel) {
       if (OPTIONS.keepId) {
         result[prop] = value.reduce((acc, curr) => {
           if (!OPTIONS.remove || !isEmpty(curr)) acc.push({
-            Id: curr.Id,
-            Name: getItem(curr.Id).name,
-            Count: curr.Count
+            Id: curr.Id ?? curr.id,
+            Name: getItem(curr.Id ?? curr.id).name,
+            Count: curr.Count ?? curr.count
           });
           return acc;
         }, []);
       } else {
         result[prop] = value.reduce((acc, curr) => {
           if (!OPTIONS.remove || !isEmpty(curr)) acc.push({
-            Id: getItem(curr.Id).name,
-            Count: curr.Count
+            Id: getItem(curr.Id ?? curr.id).name,
+            Count: curr.Count ?? curr.count
           });
           return acc;
         }, []);
@@ -293,7 +295,7 @@ function mapObject(item, excel) {
     } else if (typeof value == "object") {
       result[prop] = mapObject(value, excel);
     } else {
-      result[prop] = getText(value);
+      result[prop] = getText(tidyNumber(value));
     }
   });
   return result;

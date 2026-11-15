@@ -5,8 +5,10 @@ import Levenshtein # type: ignore
 
 from getConfig import CONFIG
 from utils.files import write_file, copy_file
+from utils.monsterConfig import monster_property
 from utils.redirect import file_redirect
 from utils.pageinfo import pageinfo
+from enemyList import added_monsters, has_name, monster_set
 
 PARTICLE_IDS = {
     22010010: ['None', 0, 1],
@@ -272,9 +274,22 @@ def find_monster_config_by_id(directory, monster_id):
     return None, None
 
 
+def find_monster_config_by_name(directory, internal_name):
+    # Sources with readable file names store configs as <MonsterName>.json.
+    if not internal_name:
+        return None, None
+    filename = f'{internal_name}.json'
+    try:
+        with open(os.path.join(directory, filename), 'r', encoding = 'utf-8') as file:
+            return json.load(file), filename
+    except (OSError, json.JSONDecodeError):
+        return None, None
+
+
 def resolve_monster_config(directory, monster_id, config_startswith, internal_name):
     candidates = [
         find_monster_config_by_id(directory, monster_id),
+        find_monster_config_by_name(directory, internal_name),
         find_similar_file(directory, config_startswith),
         find_similar_file(directory, f'ConfigMonster_{internal_name}'),
     ]
@@ -297,18 +312,7 @@ def resolve_monster_config(directory, monster_id, config_startswith, internal_na
 
 
 def get_monster_config_property(config: dict | None):
-    if not config:
-        return None
-
-    combat = config.get('combat')
-    if not isinstance(combat, dict):
-        return None
-
-    property_dict = combat.get('property')
-    if not isinstance(property_dict, dict):
-        return None
-
-    return property_dict
+    return monster_property(config)
 
 
 def parse_enemy_stats_weight(in_dict: dict):
@@ -317,7 +321,7 @@ def parse_enemy_stats_weight(in_dict: dict):
     monster_id = in_dict.get('Id')
     
     config_hash = in_dict.get('CombatConfigHash')
-    config_startswith = hex(config_hash)[8:16]
+    config_startswith = hex(int(config_hash))[8:16]
     
     config, config_name = resolve_monster_config(
         f'{CONFIG.BIN_PATH}/Monster',
@@ -362,7 +366,7 @@ def parse_enemy_stats_enduretype(in_dict: dict):
     monster_id = in_dict.get('Id')
     
     config_hash = in_dict.get('CombatConfigHash')
-    config_startswith = hex(config_hash)[8:16]
+    config_startswith = hex(int(config_hash))[8:16]
     
     config, config_name = resolve_monster_config(
         f'{CONFIG.BIN_PATH}/Monster',
@@ -425,15 +429,31 @@ def update_key_remap(in_dict: dict):
                         break
 
 
-def parse_new_enemies(args, gen_ol):
-    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Enemies'):
-            os.makedirs(f'{CONFIG.OUTPUT_PATH}/Enemies')
-    
+def old_monsters(rows=None):
+    """(ids, names) of the monsters in the build being compared against.
+
+    rows are raw ExcelBinOutput rows of that build, whose names are resolved with the current describe table;
+    without them, RepoPathOld's mapped table is read."""
+    if rows is None:
+        with open(f'{CONFIG.EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+            return monster_set(json.load(file))
+    with open(f'{CONFIG.EXCEL_PATH}/MonsterDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
+        describe_names = {item['Id']: item.get('NameTextMapHash') for item in json.load(file)}
+    return monster_set(rows, describe_names)
+
+
+def load_monsters():
     with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         monsterexcel = json.load(file)
-        
-    with open(f'{CONFIG.EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        monsterexcel_old = json.load(file)
+    # update key remap
+    if not key_remap_updated:
+        update_key_remap(monsterexcel[0])
+    return monsterexcel
+
+
+def write_enemy_pages(args, gen_ol, rows, icons = True):
+    if not os.path.exists(f'{CONFIG.OUTPUT_PATH}/Enemies'):
+        os.makedirs(f'{CONFIG.OUTPUT_PATH}/Enemies')
         
     with open(f'{CONFIG.EXCEL_PATH}/MonsterDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         describeexcel = {item['Id']: item for item in json.load(file)}
@@ -441,26 +461,9 @@ def parse_new_enemies(args, gen_ol):
     with open(f'{CONFIG.EXCEL_PATH}/AnimalCodexExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         codexexcel = {item['Id']: item for item in json.load(file)}
         
-    # update key remap
-    if not key_remap_updated:
-        update_key_remap(monsterexcel[0])
-        
-    # build list of old enemies
-    old_ids = set()
-    for item in monsterexcel_old:
+    for item in rows:
         mons_id = item.get('Id')
-        if mons_id:
-            old_ids.add(mons_id)
-        
-    for item in monsterexcel:
-        mons_id = item.get('Id')
-        if mons_id in old_ids:
-            # print(f'Skipping {mons_id}.')
-            continue
-        
         name = item.get('DescribeName')
-        if not name or isinstance(name, int):
-            continue
         
         print(f'====={mons_id}: {name}=====')
         
@@ -469,16 +472,17 @@ def parse_new_enemies(args, gen_ol):
         stats = parse_enemy_stats(item)
         
         # icons
-        describe_id = item.get('DescribeId')
-        icon_filename = describeexcel.get(describe_id).get('Icon')
-        
         out_name = f'{name} Icon.png'
         out_name_clean = out_name.replace(':', '')
         
-        if out_name != out_name_clean:
-            file_redirect(out_name, out_name_clean)
-        
-        copy_file(f'{CONFIG.IMAGE_PATH}/{icon_filename}.png', f'{CONFIG.OUTPUT_PATH}/Images/Enemy Icons/{out_name_clean}')
+        if icons:
+            describe_id = item.get('DescribeId')
+            icon_filename = describeexcel.get(describe_id).get('Icon')
+            
+            if out_name != out_name_clean:
+                file_redirect(out_name, out_name_clean)
+            
+            copy_file(f'{CONFIG.IMAGE_PATH}/{icon_filename}.png', f'{CONFIG.OUTPUT_PATH}/Images/Enemy Icons/{out_name_clean}')
         
         # codex
         desc = ''
@@ -486,6 +490,7 @@ def parse_new_enemies(args, gen_ol):
         if mons_id in codexexcel:
             codex = codexexcel[mons_id]
             desc = f'''
+
 ==Descriptions==
 {{{{Description|{codex.get('DescTextMapHash')}|[[Archive]]}}}}'''
 
@@ -539,8 +544,7 @@ def parse_new_enemies(args, gen_ol):
 {{{{Enemy Attacks
 |name_1      = 
 |desc_1      = 
-}}}}-->
-{desc}
+}}}}-->{desc}
 
 ==Gallery==
 <gallery>
@@ -557,36 +561,12 @@ def parse_new_enemies(args, gen_ol):
 {{{{Enemy Navbox|{tier[1]}}}}}"""
             
         file_write_path_2 = f'{CONFIG.OUTPUT_PATH}/Enemies/{name.replace(":", "").replace("?", r"%3F")}.wikitext'
-        write_file(file_write_path_2, file_write_2)    
-    
+        write_file(file_write_path_2, file_write_2)
 
-def parse_new_enemies_2():
+
+def write_enemy_stats(rows, filename = 'New_Enemies_Output.wikitext'):
     file_write = ['<!-------------- HP --------------->']
-    file_write_path = f'{CONFIG.OUTPUT_PATH}/New_Enemies_Output.wikitext'
-    
-    with open(f'{CONFIG.EXCEL_PATH}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        monsterexcel = json.load(file)
-        
-    with open(f'{CONFIG.EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
-        monsterexcel_old = json.load(file)
-        
-    # build list of old enemies
-    old_ids = set()
-    old_names = set()
-    for item in monsterexcel_old:
-        mons_id = item.get('Id')
-        name = item.get('DescribeName')
-        if mons_id:
-            old_ids.add(mons_id)
-        if name:
-            old_names.add(name)
-        
-    new_enemies = [
-        item for item in monsterexcel
-        if item.get('DescribeName')
-        and item.get('Id') not in old_ids
-        and item.get('DescribeName') not in old_names
-    ]
+    file_write_path = f'{CONFIG.OUTPUT_PATH}/{filename}'
 
     sections = (
         ('HP', parse_enemy_stats_2),
@@ -597,7 +577,42 @@ def parse_new_enemies_2():
     for index, (title, render_stats) in enumerate(sections):
         if index:
             file_write.append(f'\n\n<!-------------- {title} --------------->')
-        for item in new_enemies:
+        for item in rows:
             file_write.append('\n' + render_stats(item))
 
     write_file(file_write_path, ''.join(file_write))
+
+
+def parse_new_enemies(args, gen_ol, old = None, icons = True, new_names_only = False):
+    monsterexcel = load_monsters()
+    rows = added_monsters(monsterexcel, old or old_monsters(), new_names_only = new_names_only)
+    write_enemy_pages(args, gen_ol, rows, icons)
+    
+
+def parse_new_enemies_2(old = None):
+    monsterexcel = load_monsters()
+    old_ids, old_names = old or old_monsters()
+    new_enemies = [
+        item for item in monsterexcel
+        if item.get('DescribeName')
+        and item.get('Id') not in old_ids
+        and item.get('DescribeName') not in old_names
+    ]
+    write_enemy_stats(new_enemies)
+
+
+def parse_enemies(args, gen_ol, ids, icons = True, stats_file = 'New_Enemies_Output.wikitext'):
+    """Pages and stat tables for the given monster IDs; IDs sharing a name get one page (the first ID's)."""
+    wanted = set(ids)
+    rows = [item for item in load_monsters() if item.get('Id') in wanted and has_name(item)]
+    missing = sorted(wanted - {item['Id'] for item in rows})
+    if missing:
+        raise ValueError(f'Not named enemies in the active dataset: {", ".join(map(str, missing))}.')
+    pages, names = [], set()
+    for item in rows:
+        if item['DescribeName'] not in names:
+            names.add(item['DescribeName'])
+            pages.append(item)
+    write_enemy_pages(args, gen_ol, pages, icons)
+    write_enemy_stats(rows, stats_file)
+    return len(pages)

@@ -1,5 +1,6 @@
 import re
 import json
+from pathlib import Path
 
 from dataSource import load_config
 
@@ -33,45 +34,45 @@ def replace_text(file_path):
         raise
         
         
-def merge_jsons(file1, file2, output_file):
-    with open(file1, 'r', encoding = 'utf-8') as file:
-        content1 = json.load(file)
-        
-    with open(file2, 'r', encoding = 'utf-8') as file:
-        content2 = json.load(file)
-        
-    merged_content = content1
-    merged_content.update(content2)
+def merge_jsons(sources, output_file):
+    merged_content = {}
+    for source in sources:
+        with open(source, 'r', encoding = 'utf-8') as file:
+            merged_content.update(json.load(file))
     
     with open(output_file, 'w', encoding = 'utf-8') as file:
         json.dump(merged_content, file, ensure_ascii = False, indent=2)
+
+
+def numbered_parts(directory, prefix):
+    parts = []
+    for path in directory.glob(f'{prefix}_*.json'):
+        match = re.fullmatch(re.escape(prefix) + r'_(\d+)\.json', path.name)
+        if match:
+            parts.append((int(match.group(1)), path))
+    return [path for _, path in sorted(parts)]
+
+
+def textmap_sources(directory, lang):
+    '''Main map, its numbered parts, then the Medium map and its parts; later files override earlier ones.
+
+    Sources split languages differently (e.g. RU_0/RU_1 vs a single RU, TH_0/TH_1 vs TH_1/TH_2).
+    '''
+    sources = []
+    for prefix in (f'TextMap{lang}', f'TextMap_Medium{lang}'):
+        whole = directory / f'{prefix}.json'
+        sources += ([whole] if whole.is_file() else []) + numbered_parts(directory, prefix)
+    if not sources:
+        raise FileNotFoundError(f'No TextMap files found for {lang} in {directory}')
+    return sources
         
 
 repl_langs = ["EN"]
-merge_langs = {
-    "CHS": ["CHS", "_MediumCHS"],
-    "CHT": ["CHT", "_MediumCHT"],
-    "DE": ["DE", "_MediumDE"],
-    "EN": ["EN", "_MediumEN"],
-    "ES": ["ES", "_MediumES"],
-    "FR": ["FR", "_MediumFR"],
-    "ID": ["ID", "_MediumID"],
-    "IT": ["IT", "_MediumIT"],
-    "JP": ["JP", "_MediumJP"],
-    "KR": ["KR", "_MediumKR"],
-    "PT": ["PT", "_MediumPT"],
-    "RU_Temp1": ["RU_0", "RU_1"],
-    "RU_Temp2": ["RU_Temp1", "_MediumRU_0"],
-    "RU": ["RU_Temp2", "_MediumRU_1"],
-    "TH_Temp1": ["TH_0", "TH_1"],
-    "TH_Temp2": ["TH_Temp1", "_MediumTH_0"],
-    "TH": ["TH_Temp2", "_MediumTH_1"],
-    "TR": ["TR", "_MediumTR"],
-    "VI": ["VI", "_MediumVI"],    
-}
+merge_langs = ['CHS', 'CHT', 'DE', 'EN', 'ES', 'FR', 'ID', 'IT', 'JP', 'KR', 'PT', 'RU', 'TH', 'TR', 'VI']
 
-for lang, files in merge_langs.items():
-    merge_jsons(f'{CONFIG_FILE["RepoPath"]}/TextMap/TextMap{files[0]}.json', f'{CONFIG_FILE["RepoPath"]}/TextMap/TextMap{files[1]}.json', f'{CONFIG_FILE["RepoPath"]}/TextMap/TextMap{lang}.json')
+textmap_dir = Path(CONFIG_FILE['RepoPath']) / 'TextMap'
+for lang in merge_langs:
+    merge_jsons(textmap_sources(textmap_dir, lang), textmap_dir / f'TextMap{lang}.json')
 
 for lang in repl_langs:
     replace_text(fr"{CONFIG_FILE['RepoPath']}\TextMap\TextMap{lang}.json")

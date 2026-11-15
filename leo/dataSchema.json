@@ -1,0 +1,72 @@
+{
+  "_comment": "Field names differ between data sources and builds. 'aliases' renames raw Excel variants (per table, at any depth) to the canonical name before mapping, unless the canonical name is already present. 'monsterConfig' lists scrambled names of BinOutput/Monster combat.property fields (used when a source scrambles every key). Scrambled names change with game builds: when setup warns that a field is missing, find its new name and add it here.",
+  "aliases": {
+    "AvatarExcelConfigData": {
+      "AOBCHLDFLOD": "elementMastery"
+    },
+    "AvatarSkillDepotExcelConfigData": {
+      "LHFOOPMJHBN": "specialProudSkillOpens",
+      "LLALJAIDKPI": "specialProudSkillOpens"
+    },
+    "BlessingScanExcelConfigData": {
+      "DPHEEBBBCBE": "typeId"
+    },
+    "BlessingScanTypeExcelConfigData": {
+      "DPHEEBBBCBE": "typeId",
+      "JKJHLGGAGLF": "typeNameWithColorTextMapHash",
+      "MCDEGDPDFCC": "dailyScanLimit",
+      "BNAAANHEGEM": "upPoolId"
+    },
+    "FettersExcelConfigData": {
+      "voice_file": "voiceFile",
+      "voice_file_textTextMapHash": "voiceFileTextTextMapHash",
+      "voice_titleTextMapHash": "voiceTitleTextMapHash",
+      "voice_title_lockedTextMapHash": "voiceTitleLockedTextMapHash"
+    },
+    "GCGDeckExcelConfigData": {
+      "DHELPPKALBF": "waitingCharacterList"
+    },
+    "HuntingV2MonsterBundleExcelConfigData": {
+      "mechanismTitle1": "mechanismTitle1TextMapHash",
+      "mechanismTitle2": "mechanismTitle2TextMapHash",
+      "mechanismDesc1": "mechanismDesc1TextMapHash",
+      "mechanismDesc2": "mechanismDesc2TextMapHash",
+      "newsText": "newsTextTextMapHash",
+      "traitText": "traitTextTextMapHash"
+    },
+    "HuntingV2RegionExcelConfigData": {
+      "regionInfo": "regionInfoTextMapHash"
+    },
+    "HyperLinkNameExcelConifgData": {
+      "ID": "id"
+    },
+    "TowerLevelExcelConfigData": {
+      "MCDKLJPMHJD": "towerMonsterPreview",
+      "ALDIPCBJHEM": "towerMonsterPreviewId1",
+      "JMDMEKBFNGG": "towerMonsterPreviewId2"
+    },
+    "TowerScheduleExcelConfigData": {
+      "NHNCCMOKPHP": "schedules"
+    }
+  },
+  "required": {
+    "AvatarExcelConfigData": ["ElementMastery"],
+    "AvatarSkillDepotExcelConfigData": ["SpecialProudSkillOpens", "InherentProudSkillOpens", "Skills", "EnergySkill", "Talents"],
+    "BlessingScanExcelConfigData": ["TypeId", "RefId", "ScanType"],
+    "BlessingScanTypeExcelConfigData": ["TypeId", "TypeNameTextMapHash"],
+    "FettersExcelConfigData": ["VoiceFile", "VoiceTitleTextMapHash", "VoiceFileTextTextMapHash"],
+    "GCGDeckExcelConfigData": ["CharacterList", "WaitingCharacterList", "CardList"],
+    "GCGGameExcelConfigData": ["OppoPlayerNameTextMapHash", "EnemyCardGroupId"],
+    "GCGGameRewardExcelConfigData": ["LevelNameTextMapHash", "LevelDecTextMapHash"],
+    "HuntingV2MonsterBundleExcelConfigData": ["MechanismTitle1TextMapHash", "MechanismDesc1TextMapHash", "NewsTextTextMapHash", "TraitTextTextMapHash"],
+    "HuntingV2RegionExcelConfigData": ["RegionInfoTextMapHash"],
+    "HyperLinkNameExcelConifgData": ["Id", "NameTextMapHash", "DescTextMapHash"],
+    "MonsterExcelConfigData": ["CombatConfigHash", "MonsterName", "DescribeId"],
+    "TowerScheduleExcelConfigData": ["Schedules"]
+  },
+  "monsterConfig": {
+    "weight": ["BEHGCPKMLNN", "CLJMNAEDEFD"],
+    "bonusRange": [],
+    "endureType": ["GCOKCICMHFH"]
+  }
+}
