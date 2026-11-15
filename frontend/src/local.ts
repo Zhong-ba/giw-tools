@@ -227,8 +227,16 @@ async function listJobs(): Promise<Job[]> {
 
 async function getJob(id: string): Promise<{ job: Job; local: boolean }> {
   const store = await ready()
-  const job = store ? (await savedJobs(store)).get(id) : undefined
-  return job ? { job, local: true } : { job: await server<Job>(`/jobs/${id}`), local: false }
+  const saved = async () => store ? (await savedJobs(store)).get(id) : undefined
+  const job = await saved()
+  if (job) return { job, local: true }
+  try { return { job: await server<Job>(`/jobs/${id}`), local: false } }
+  catch (reason) {
+    // The job may have been copied here and deleted on the server while the request was in flight.
+    const copied = reason instanceof ApiError && reason.status === 404 ? await saved() : undefined
+    if (!copied) throw reason
+    return { job: copied, local: true }
+  }
 }
 
 /** A job's output file, from this browser's copy or else the server. */
@@ -510,7 +518,14 @@ async function handleJobs(path: string, method: string, body: Record<string, unk
   if (!match) throw new ApiError('Not found.', 404)
   const [, id, section, rest] = match
   const { job, local } = await getJob(id)
-  if (!local) return server(path, options)
+  if (!local) {
+    try { return await server(path, options) }
+    catch (reason) {
+      // Same race as in getJob: retry against this browser's copy once it exists.
+      if (reason instanceof ApiError && reason.status === 404 && (await getJob(id)).local) return handleJobs(path, method, body, options)
+      throw reason
+    }
+  }
   const store = await need()
   const name = rest ? rest.split('/').map(decodeURIComponent).join('/') : ''
   if (!section) {

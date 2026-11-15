@@ -1101,18 +1101,27 @@ function App() {
     }).catch(reason => setNetworkError(message(reason)))
     return () => { cancelled = true; cleanup() }
   }, [])
+  // Hosted refreshes also copy finished jobs into browser storage, so they can overlap; only the newest one's result counts,
+  // or a refresh started before a job was submitted could drop it from the list (and close its dialog).
+  const refreshes = useRef(0)
+  const refreshing = useRef(0)
   const refresh = useCallback(async (signal?: AbortSignal) => {
+    const current = ++refreshes.current
+    refreshing.current++
     try {
       const [nextJobs, nextDataset, nextTools, nextBot] = await Promise.all([
         api<Job[]>('/jobs', { signal }), api<Dataset>('/dataset', { signal }), api<Tool[]>('/tools', { signal }), api<BotState>('/bot', { signal }),
       ])
+      if (current !== refreshes.current) return
       setJobs(nextJobs); setDataset(nextDataset); setTools(nextTools); setBot(nextBot); setNetworkError('')
-    } catch (reason) { if (!signal?.aborted) setNetworkError(message(reason)) }
+    } catch (reason) { if (!signal?.aborted && current === refreshes.current) setNetworkError(message(reason)) }
+    finally { refreshing.current-- }
   }, [])
   useEffect(() => {
     const controller = new AbortController()
     const initial = setTimeout(() => { void refresh(controller.signal) }, 0)
-    const timer = setInterval(() => { void refresh(controller.signal) }, 2000)
+    // Polling skips a tick while a slow refresh is still running instead of superseding it.
+    const timer = setInterval(() => { if (!refreshing.current) void refresh(controller.signal) }, 2000)
     return () => { controller.abort(); clearTimeout(initial); clearInterval(timer) }
   }, [refresh])
   useEffect(() => {
@@ -1150,6 +1159,7 @@ function App() {
       catch (reason) { failure = `${job.name} ${job.id.slice(0, 8)}: ${message(reason)}` }
     }
     setJobs(previous => previous.filter(item => !removed.has(item.id)))
+    refreshes.current++
     setCheckedJobs(previous => new Set([...previous].filter(id => !removed.has(id))))
     setSelectedJob(current => current && removed.has(current) ? null : current)
     if (failure) {

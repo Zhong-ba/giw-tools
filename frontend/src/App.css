@@ -167,7 +167,7 @@ body.party-time .main-shell { overflow: clip; }
 .dialog { padding: 0; border: 1px solid #28364c; border-radius: 13px; width: min(570px,calc(100vw - 32px)); max-height: calc(100vh - 60px); color: #d6dbe2; background: #161e2b; box-shadow: 0 24px 100px #000a; }
 .dialog.wide { width: min(1060px,calc(100vw - 40px)); }
 .dialog.wide:has(.with-references) { width: min(1500px,calc(100vw - 40px)); }
-.dialog::backdrop { background: #03070db3; backdrop-filter: blur(3px); }
+.dialog::backdrop { background: #03070dcc; }
 .dialog-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; gap: 20px; border-bottom: 1px solid #1f2c40; }
 .dialog-title { min-width: 0; }
 .dialog-header h2 { font-size: 19px; }
