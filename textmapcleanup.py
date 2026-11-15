@@ -75,4 +75,4 @@ for lang in merge_langs:
     merge_jsons(textmap_sources(textmap_dir, lang), textmap_dir / f'TextMap{lang}.json')
 
 for lang in repl_langs:
-    replace_text(fr"{CONFIG_FILE['RepoPath']}\TextMap\TextMap{lang}.json")
+    replace_text(textmap_dir / f'TextMap{lang}.json')
