@@ -151,6 +151,8 @@ def character_kit(output: Path, parameters: dict[str, JsonValue]) -> None:
 
     if inputs.generate_icons:
         for name, directory in (('textures', CONFIG.IMAGE_PATH), ('talent backgrounds', CONFIG.TALENT_BG_PATH)):
+            if not directory:
+                raise FileNotFoundError(f'No {name} directory is configured, so icons cannot be generated.')
             if not Path(directory).is_dir():
                 raise FileNotFoundError(f'Configured {name} directory does not exist: {directory}')
     arguments = [

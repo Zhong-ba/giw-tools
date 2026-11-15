@@ -55,6 +55,15 @@ class ToolTests(unittest.TestCase):
     def write_json(self, path, value):
         path.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
 
+    def test_config_without_local_asset_paths(self):
+        self.write_json(self.work / 'scriptconfig.json', {'RepoPath': str(self.work), 'OutputPath': str(self.output)})
+        config = importlib.import_module('getConfig').CONFIG
+        self.assertIsNone(config.IMAGE_PATH)
+        self.assertIsNone(config.TALENT_BG_PATH)
+        self.assertIsNone(config.EXCEL_PATH_OLD)
+        with self.assertRaisesRegex(FileNotFoundError, 'RepoPathOld is not configured'):
+            importlib.import_module('utils.enemies').old_monsters()
+
     def read_output(self, name):
         return (self.output / name).read_text(encoding='utf-8')
 

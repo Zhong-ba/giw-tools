@@ -191,6 +191,8 @@ def parse_fishing_points(selection, old_pools = None):
         pool_ids = list(current)
     elif selection == 'new':
         if old_pools is None:
+            if CONFIG.EXCEL_PATH_OLD is None:
+                raise FileNotFoundError('RepoPathOld is not configured; choose an older revision to compare against.')
             with open(f'{CONFIG.EXCEL_PATH_OLD}/FishPoolExcelConfigData.json', 'r', encoding = 'utf-8') as file:
                 old_pools = json.load(file)
         old_ids = {pool.get('Id', pool.get('id')) for pool in old_pools}

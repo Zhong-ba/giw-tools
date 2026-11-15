@@ -435,6 +435,8 @@ def old_monsters(rows=None):
     rows are raw ExcelBinOutput rows of that build, whose names are resolved with the current describe table;
     without them, RepoPathOld's mapped table is read."""
     if rows is None:
+        if CONFIG.EXCEL_PATH_OLD is None:
+            raise FileNotFoundError('RepoPathOld is not configured; choose an older revision to compare against.')
         with open(f'{CONFIG.EXCEL_PATH_OLD}/MonsterExcelConfigData.json', 'r', encoding = 'utf-8') as file:
             return monster_set(json.load(file))
     with open(f'{CONFIG.EXCEL_PATH}/MonsterDescribeExcelConfigData.json', 'r', encoding = 'utf-8') as file:
