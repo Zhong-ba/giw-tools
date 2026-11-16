@@ -32,15 +32,13 @@ def load_data(progress_callback = None):
         print_progress_bar(index + 1, len(LANGS))
             
 
+def find_text_id(text, input_lang='EN'):
+    return next((item for item, value in data[input_lang].items() if value == text), None)
+
+
 def gen_ol(text, input_lang = 'EN', tl = True, rm = True):
-    textid = 0
-
-    for item, value in data[input_lang].items():
-        if value == text:
-            textid = item
-            break
-
-    if textid == 0:
+    textid = find_text_id(text, input_lang)
+    if textid is None:
         return 'Not found.'
 
     return format_ol({lang: values.get(textid) for lang, values in data.items()}, text, tl, rm)

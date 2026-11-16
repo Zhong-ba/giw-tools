@@ -183,6 +183,9 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   `.data/ol` beside the profile makes new name/hash lookups fast without keeping
   another multi-GB copy of the TextMaps in RAM. Each dataset has its own index, reused
   across server restarts and rebuilt transactionally when its TextMaps change.
+  Job-based tools (including Character Kit, Enemies, and Stygian Onslaught) use the
+  same index instead of loading all TextMaps. Their existing exact-name matching
+  and output formatting are unchanged; the desktop tools retain their original loader.
   The first lookup builds the index; to prepare the active dataset before serving
   users, run `python -m webui.languages` (in Docker: `docker exec <container> python -m webui.languages`).
   Allow extra disk space for the indexes and rebuilding them. The existing OL job

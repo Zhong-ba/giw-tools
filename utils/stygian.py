@@ -217,7 +217,7 @@ def _other_languages(name):
     raw = _load('ManualTextMapConfigData', Path(CONFIG.EXCEL_PATH).parent / 'ExcelBinOutput')
     title = next((next(iter(_numbers(row).values())) for row in raw
                   if 'UI_ACTIVITY_LEYLINEC_REWARDTYPE_SINGLE' in row.values()), None)
-    name_id = next((key for key, value in OLGen.data['EN'].items() if value == name), None)
+    name_id = OLGen.find_text_id(name)
     if title is None or name_id is None:
         return OLGen.gen_ol(f'Stygian Onslaught: {name}')
     texts = {}

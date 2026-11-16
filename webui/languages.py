@@ -1,5 +1,6 @@
-"""Persistent, dataset-specific indexes for direct Other Languages lookups."""
+"""Persistent, dataset-specific indexes for Other Languages lookups."""
 
+from collections.abc import Iterator, Mapping
 from contextlib import closing
 import hashlib
 import json
@@ -81,6 +82,46 @@ def ensure_index(directory: Path, cache: Path) -> Path:
         connection.commit()
         logger.info('Other Languages index ready: %s', path)
     return path
+
+
+class IndexedTextMap(Mapping[str, str]):
+    """Read selected TextMap values without loading a language into memory."""
+
+    def __init__(self, path: Path, language: str):
+        self.path = path
+        self.language = language
+
+    def __getitem__(self, identifier: str) -> str:
+        with closing(sqlite3.connect(self.path, timeout=600)) as connection:
+            row = connection.execute(
+                'SELECT text FROM texts WHERE identifier = ? AND language = ?', (identifier, self.language)
+            ).fetchone()
+        if row is None:
+            raise KeyError(identifier)
+        return row[0]
+
+    def __iter__(self) -> Iterator[str]:
+        with closing(sqlite3.connect(self.path, timeout=600)) as connection:
+            for row in connection.execute(
+                'SELECT identifier FROM texts WHERE language = ? ORDER BY position', (self.language,)
+            ):
+                yield row[0]
+
+    def __len__(self) -> int:
+        with closing(sqlite3.connect(self.path, timeout=600)) as connection:
+            return connection.execute(
+                'SELECT COUNT(*) FROM texts WHERE language = ?', (self.language,)
+            ).fetchone()[0]
+
+    def find_id(self, text: str) -> str | None:
+        # Legacy generators select the first exact name, not a hash or a case-insensitive match.
+        with closing(sqlite3.connect(self.path, timeout=600)) as connection:
+            return next((
+                identifier for identifier, value in connection.execute(
+                    'SELECT identifier, text FROM texts WHERE language = ? AND search_key = ? ORDER BY position',
+                    (self.language, _search_key(text)),
+                ) if value == text
+            ), None)
 
 
 def language_results(directory: Path, cache: Path, text: str, input_lang: str) -> list[dict[str, str]]:

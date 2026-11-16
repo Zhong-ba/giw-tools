@@ -153,6 +153,57 @@ class ToolTests(unittest.TestCase):
         self.assertIn('First duplicate', module.gen_ol('Duplicate'))
         self.assertEqual(module.gen_ol('Missing'), 'Not found.')
 
+    def test_indexed_ol_preserves_legacy_output_without_loading_textmaps(self):
+        from webui.languages import ensure_index
+        from webui.worker import _shared_textmaps
+
+        original = self.load_ol()
+        original.data['FR']['2'] = 'First duplicate'
+        original.data['FR']['3'] = 'Second duplicate'
+        original.data['EN']['4'] = 'duplicate'
+        for values in original.data.values():
+            values['5'] = '#Stygian Onslaught: {0}'
+        original.data['FR']['5'] = '#Assaut stygien : {0}'
+        for language, values in original.data.items():
+            self.write_json(self.work / 'TextMap' / f'TextMap{language}.json', values)
+        cases = [
+            ('Normal Attack: Strike', 'EN', True, True),
+            ('Attaque normale : Frappe', 'FR', False, False),
+            ('Duplicate', 'EN', True, False),
+            ('duplicate', 'EN', False, True),
+            ('DUPLICATE', 'EN', True, True),
+            ('1', 'EN', True, True),
+            ('Missing', 'EN', True, True),
+        ]
+        expected = [original.gen_ol(*case) for case in cases]
+        stygian_expected = original.format_ol({
+            language: values['5'].split('{0}')[0].removeprefix('#') + values['2']
+            for language, values in original.data.items()
+        }, 'Stygian Onslaught: Duplicate')
+        cache = self.work / '.data' / 'ol'
+        ensure_index(self.work / 'TextMap', cache)
+        real_open = open
+
+        def no_textmap_open(path, *args, **kwargs):
+            if Path(path).name.startswith('TextMap'):
+                raise AssertionError('Legacy TextMaps were opened')
+            return real_open(path, *args, **kwargs)
+
+        with patch('webui.languages._load_textmap', side_effect=AssertionError('Index rebuilt')), \
+                patch('builtins.open', side_effect=no_textmap_open):
+            indexed = _shared_textmaps(str(self.work), cache)
+            indexed.load_data()
+            self.assertEqual([indexed.gen_ol(*case) for case in cases], expected)
+            self.assertEqual(indexed.find_text_id('Duplicate'), '2')
+            self.assertEqual(indexed.data['FR'].get('2'), 'First duplicate')
+            self.assertIsNone(indexed.data['FR'].get('missing'))
+            stygian = importlib.import_module('utils.stygian')
+            with patch.object(stygian, '_load', return_value=[
+                    {'TextMapId': 'UI_ACTIVITY_LEYLINEC_REWARDTYPE_SINGLE', 'TextMapContentTextMapHash': 5},
+            ]), patch.object(type(indexed.data['EN']), '__iter__', side_effect=AssertionError('Full TextMap scan')):
+                self.assertEqual(stygian._other_languages('Duplicate'), stygian_expected)
+        self.assertNotIn('Loading OL', self.stdout.getvalue())
+
     def test_character_pages_and_effects(self):
         tool = self.character_tool()
         self.assertEqual(len(list((self.output / 'Tester').rglob('*.wikitext'))), 12)

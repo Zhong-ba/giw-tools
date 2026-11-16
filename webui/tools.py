@@ -168,7 +168,7 @@ def other_languages(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = LanguageInputs.model_validate(parameters)
     import OLGen
 
-    # In the resident worker this loads the TextMaps only on first use in the session.
+    # The resident worker redirects legacy OL calls to the persistent index.
     OLGen.load_data()
     result = OLGen.gen_ol(inputs.text, inputs.input_lang, inputs.translation, inputs.romanization)
     if result == 'Not found.':

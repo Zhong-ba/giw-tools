@@ -198,14 +198,19 @@ class WebTests(unittest.TestCase):
         self.assertEqual(languages.language_results(other, cache, 'Amber', 'EN'), [])
         self.assertEqual(languages.language_results(directory, cache, 'Amber', 'EN')[0]['textmap_hash'], '101')
 
-    def test_textmaps_load_once_per_session_and_jobs_keep_own_config(self):
+    def test_jobs_reuse_prebuilt_language_index_and_keep_own_config(self):
+        response = self.client.post('/api/other-languages', json={'text': 'Amber'})
+        self.assertEqual(response.status_code, 200, response.text)
+        index = next((self.root / '.data' / 'ol').glob('*.sqlite3'))
+        modified = index.stat().st_mtime_ns
         first = self.wait(self.client.post('/api/jobs', json={
             'tool_id': 'other-languages', 'parameters': {'text': 'Amber'},
         }).json()['id'])
         self.assertEqual(first['status'], 'succeeded', self.client.get(f"/api/jobs/{first['id']}/logs").text)
-        self.assertIn('Loading OL', self.client.get(f"/api/jobs/{first['id']}/logs").json()['text'])
-        # Proves the next job reads the already-loaded maps rather than the files.
-        (self.dataset / 'TextMap' / 'TextMapFR.json').unlink()
+        log = self.client.get(f"/api/jobs/{first['id']}/logs").json()['text']
+        self.assertIn('Using persistent Other Languages index', log)
+        self.assertNotIn('Loading OL', log)
+        self.assertEqual(index.stat().st_mtime_ns, modified)
         redirect = self.wait(self.client.post('/api/jobs', json={
             'tool_id': 'redirects', 'parameters': {'lines': 'Between%%%Target'},
         }).json()['id'])
@@ -215,9 +220,19 @@ class WebTests(unittest.TestCase):
         }).json()['id'])
         log = self.client.get(f"/api/jobs/{second['id']}/logs").json()['text']
         self.assertEqual(second['status'], 'succeeded', log)
-        self.assertIn('already loaded', log)
+        self.assertIn('Using persistent Other Languages index', log)
         self.assertNotIn('Loading OL', log)
         self.assertEqual(len(second['files']), 1)
+        self.assertEqual(index.stat().st_mtime_ns, modified)
+        self.assertEqual(list(self.root.rglob('*.sqlite3')), [index])
+        (self.dataset / 'TextMap' / 'TextMapFR.json').write_text('{"101": "Updated French"}', encoding='utf-8')
+        refreshed = self.wait(self.client.post('/api/jobs', json={
+            'tool_id': 'other-languages', 'parameters': {'text': 'Amber'},
+        }).json()['id'])
+        self.assertEqual(refreshed['status'], 'succeeded',
+                         self.client.get(f"/api/jobs/{refreshed['id']}/logs").text)
+        text = self.client.get(f"/api/jobs/{refreshed['id']}/preview/{refreshed['files'][0]['path']}").json()['text']
+        self.assertIn('|fr       = Updated French', text)
 
     def test_edit_wikitext_and_delete_job(self):
         job = self.wait(self.client.post('/api/jobs', json={

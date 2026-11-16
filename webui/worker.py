@@ -9,7 +9,7 @@ import sys
 import traceback
 from types import ModuleType
 
-from dataSource import ROOT
+from dataSource import ROOT, data_root
 
 # Modules that survive between jobs in the resident worker. Everything else imported from
 # this repository is re-imported per job, because legacy modules read the config at import.
@@ -37,26 +37,31 @@ def _purge_job_modules() -> None:
             del sys.modules[name]
 
 
-def _shared_textmaps(dataset: str) -> ModuleType:
-    """Import OLGen once per dataset and make load_data() load the TextMaps only once."""
+def _shared_textmaps(dataset: str, cache: Path) -> ModuleType:
+    """Keep legacy generators on the same persistent index as direct OL lookups."""
+    from webui.languages import IndexedTextMap, ensure_index
+
     module = sys.modules.get('OLGen')
-    if module is not None and getattr(module, 'webui_dataset', None) == dataset:
+    if module is not None and getattr(module, 'webui_dataset', None) == (dataset, cache):
         return module
     sys.modules.pop('OLGen', None)
     gc.collect()
     module = importlib.import_module('OLGen')
-    original = module.load_data
-    state = {'loaded': False}
 
-    def load_once(progress_callback=None):
-        if state['loaded']:
-            print('Using TextMaps already loaded in this session.', flush=True)
-            return
-        original(progress_callback)
-        state['loaded'] = True
+    def load_index(progress_callback=None):
+        print('Opening persistent Other Languages index (builds it if needed).', flush=True)
+        path = ensure_index(Path(dataset) / 'TextMap', cache)
+        module.data = {language: IndexedTextMap(path, language) for language in module.LANGS}
+        if progress_callback:
+            progress_callback(len(module.LANGS), len(module.LANGS))
+        print('Using persistent Other Languages index.', flush=True)
 
-    module.load_data = load_once
-    module.webui_dataset = dataset
+    def find_text_id(text, input_lang='EN'):
+        return module.data[input_lang].find_id(text)
+
+    module.load_data = load_index
+    module.find_text_id = find_text_id
+    module.webui_dataset = (dataset, cache)
     return module
 
 
@@ -68,7 +73,8 @@ def run_tool(directory: Path) -> None:
     _purge_job_modules()
     tool = importlib.import_module('webui.tools').TOOLS[request['tool_id']]
     if tool.requires_dataset:
-        _shared_textmaps(json.loads(config.read_text(encoding='utf-8'))['RepoPath'])
+        _shared_textmaps(json.loads(config.read_text(encoding='utf-8'))['RepoPath'],
+                        data_root(Path(request['config_path'])) / 'ol')
     argv = sys.argv
     try:
         tool.execute(directory / 'output', request['parameters'])
