@@ -15,7 +15,7 @@ import { highlightLua } from './lua'
 import { findJson, sortKeys } from './json'
 import { JsonView } from './JsonView'
 import type { JsonHit } from './JsonView'
-import { startParty, stopParty } from './party'
+import { boostParty, startParty, stopParty } from './party'
 import { findMatches, markMatches, useFindShortcut } from './search'
 import { SearchBar } from './SearchBar'
 import { OtherLanguages } from './OtherLanguages'
@@ -1283,7 +1283,12 @@ function App() {
     `${tool.name} ${tool.description}`.toLowerCase().includes(search.toLowerCase()))
   return <div className="workspace">
     <aside className="sidebar">
-      <a className="brand" href="/" onMouseEnter={event => startParty(event.currentTarget.querySelector('img'), page === 'tools')} onMouseLeave={stopParty}><img className="brand-mark" src="/painmelo.png" alt="" /><span>Painmelo</span></a>
+      <button className="brand" type="button" title="Click to boost the spin-up"
+        onMouseEnter={event => startParty(event.currentTarget.querySelector('img'), page === 'tools')}
+        onMouseLeave={stopParty} onBlur={stopParty}
+        onClick={event => boostParty(event.currentTarget.querySelector('img'), page === 'tools')}>
+        <img className="brand-mark" src="/painmelo.png" alt="" /><span>Painmelo</span>
+      </button>
       <nav aria-label="Main navigation">
         <button className={page === 'tools' ? 'active' : ''} onClick={() => setPage('tools')}><LayoutGrid size={18} /> Tools <span>{tools.length}</span></button>
         <button className={page === 'jobs' ? 'active' : ''} onClick={() => setPage('jobs')}><Clock3 size={18} /> Jobs {activeJobs.length > 0 && <span>{activeJobs.length}</span>}</button>
@@ -1311,6 +1316,7 @@ function App() {
               const disabled = tool.requires_dataset && !dataset?.ready
               return <button className={`tool-card ${tool.id}`} key={tool.id} onClick={() => disabled ? setPage('dataset') : openTool(tool)}
                 title={disabled ? 'Prepare the dataset to use this tool' : `Open ${tool.name}`}>
+                {tool.id === 'attribute-scaling' && <img className="tool-watermark" src="/leopeek.png" alt="" aria-hidden="true" />}
                 <span className="tool-card-top"><span className="tool-icon"><Icon className="tool-glyph" size={25} strokeWidth={1.6} /><img className="tool-melo" src="/painmelo.png" alt="" /></span><span className="category-label">{tool.category}</span></span>
                 <ToolText className="tool-name" text={tool.name} />
                 <ToolText className="tool-description" text={tool.description} />

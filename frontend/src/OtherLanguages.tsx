@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Check, CircleAlert, Copy, LoaderCircle } from 'lucide-react'
+import { Check, ChevronRight, CircleAlert, Copy, LoaderCircle } from 'lucide-react'
 import { api, message } from './api'
 import type { LanguageResult } from './api'
 import { findMatches, markMatches } from './search'
@@ -35,15 +35,20 @@ function ResultCard({ result, query, translation, romanization, header }: {
   }
   return <details className="ol-result panel" open>
     <summary>
+      <ChevronRight size={14} className="ol-result-chevron" aria-hidden="true" />
       <span>TextMapHash: <code>{result.textmap_hash}</code></span>
-      <button className="button secondary small" onClick={event => { event.preventDefault(); void copy() }}>
-        {copied ? <Check size={14} /> : <Copy size={14} />}{copied ? 'Copied' : 'Copy'}
-      </button>
+      <span className="ol-result-actions">
+        <span className="ol-checkboxes" role="group" aria-label="Result Output Options">
+          <label><input type="checkbox" checked={translation && !removeTL} disabled={!translation}
+            onChange={event => setRemoveTL(!event.target.checked)} />Include _tl</label>
+          <label><input type="checkbox" checked={romanization && !removeRM} disabled={!romanization}
+            onChange={event => setRemoveRM(!event.target.checked)} />Include _rm</label>
+        </span>
+        <button className="button secondary small" onClick={event => { event.preventDefault(); void copy() }}>
+          {copied ? <Check size={14} /> : <Copy size={14} />}{copied ? 'Copied' : 'Copy'}
+        </button>
+      </span>
     </summary>
-    <div className="ol-result-actions">
-      <button className="text-button" disabled={!romanization} onClick={() => setRemoveRM(!removeRM)}>{removeRM ? 'Restore RM' : 'Remove RM'}</button>
-      <button className="text-button" disabled={!translation} onClick={() => setRemoveTL(!removeTL)}>{removeTL ? 'Restore TL' : 'Remove TL'}</button>
-    </div>
     {error && <div className="error-box" role="alert"><CircleAlert size={16} />{error}</div>}
     <pre className="text-preview">{markMatches(highlightWikitext(text), findMatches(text, query), query.length, -1)}</pre>
   </details>

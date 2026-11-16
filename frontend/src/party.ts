@@ -2,6 +2,7 @@
 // and once they are all at top speed the main area erupts. Leaving undoes it all in reverse order.
 const MAX_SPEED = 2880
 const TOP_SPEED = MAX_SPEED * 0.97
+const BOOST_SECONDS = 0.65
 // Logistic growth: starts gently, accelerates, then eases into top speed.
 const accelerate = (speed: number, dt: number) => Math.min(MAX_SPEED, speed + 2.2 * (speed + 60) * (1 - speed / MAX_SPEED) * dt)
 const SPIN_UP = (() => {
@@ -27,6 +28,12 @@ class Spinner {
   elapsed = 0
   constructor(img: HTMLImageElement) { this.img = img }
   get top() { return this.speed >= TOP_SPEED }
+  boost() {
+    this.mode = 'up'
+    for (let time = 0; time < BOOST_SECONDS; time += 1 / 120) {
+      this.speed = accelerate(this.speed, Math.min(1 / 120, BOOST_SECONDS - time))
+    }
+  }
   hold() { if (this.mode === 'up') this.mode = 'hold' }
   down() {
     if (this.mode === 'down') return
@@ -557,3 +564,21 @@ export const startParty = (img: HTMLImageElement | null, allowParty: boolean) =>
   requestAnimationFrame(frame)
 }
 export const stopParty = () => { hovered = false }
+
+/** Advances the current ramp without jumping the icons' rotation angles. */
+export const boostParty = (img: HTMLImageElement | null, allowParty: boolean) => {
+  if (!img) return
+  img.closest('.brand')?.animate([
+    { backgroundColor: 'transparent' },
+    { backgroundColor: '#7aaaff26', offset: 0.2 },
+    { backgroundColor: 'transparent' },
+  ], { duration: 350, easing: 'ease-out' })
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  img.animate([
+    { scale: '1' }, { scale: '1.22', offset: 0.3 }, { scale: '0.96', offset: 0.7 }, { scale: '1' },
+  ], { duration: 300, easing: 'ease-out' })
+  startParty(img, allowParty)
+  if (party) return
+  for (const spinner of [logo, ...tools]) spinner?.boost()
+  if (toolClock !== null) toolClock += BOOST_SECONDS
+}

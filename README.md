@@ -150,6 +150,7 @@ Existing command-line tools remain available.
 While a tool card's icon is replaced by Painmelo (on hover, keyboard focus, or
 during the logo's party sequence), `fish` in its displayed name and description
 temporarily becomes `fimsh`. Only changed text crossfades; tool inputs and outputs are unaffected.
+Click the Painmelo brand to boost the spin-up with a short pulse instead of reloading the page.
 
 ### Install and start
 Complete the configuration and Node.js mapper dependency steps in Setup above.
@@ -182,6 +183,7 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   an exact name (case insensitive) in the chosen language, or enter a TextMapHash.
   Each distinct set of localized names gets a collapsible result card with Copy,
   translation (`_tl`), romanization (`_rm`), and optional section-header checkboxes.
+  Each result also has its own TL/RM checkboxes beside Copy; the top checkboxes apply to all results.
   Double-click empty space in a tool window to maximize it or restore its size.
   Repeated hashes with identical localized names are shown once. Results use the
   original formatter, shared with the desktop tool. A persistent SQLite index under
