@@ -58,16 +58,19 @@ main { max-width: 1420px; margin: auto; padding: 0 36px 40px; }
 .tool-card:active { transform: translateY(0); }
 .tool-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
 .tool-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 44px; width: 44px; border-radius: 12px; background: #242f42; color: #a3bff0; }
-/* The spin pauses instead of resetting on leave, so the fading Painmelo doesn't snap back upright. */
 .tool-glyph, .tool-melo { transition: opacity .3s ease, scale .3s ease; }
-.tool-melo { position: absolute; width: 32px; height: 34px; object-fit: contain; opacity: 0; scale: .6; pointer-events: none; animation: spin 1.4s linear infinite paused; }
-.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-glyph { opacity: 0; scale: .6; }
-.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-melo { opacity: 1; scale: 1; animation-play-state: running; }
+.tool-melo { position: absolute; width: 32px; height: 34px; object-fit: contain; opacity: 0; scale: .6; pointer-events: none; }
 .tool-text-swap { display: grid; }
 .tool-text-swap > span { grid-area: 1 / 1; transition: opacity .3s ease; }
 .tool-text-fimsh { opacity: 0; }
-.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-text-original { opacity: 0; }
-.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-text-fimsh { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  /* Pause on leave so the fading Painmelo doesn't snap back upright. */
+  .tool-melo { animation: spin 1.4s linear infinite paused; }
+  .tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-glyph { opacity: 0; scale: .6; }
+  .tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-melo { opacity: 1; scale: 1; animation-play-state: running; }
+  .tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-text-original { opacity: 0; }
+  .tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-text-fimsh { opacity: 1; }
+}
 .party-layer { position: fixed; z-index: 15; pointer-events: none; }
 body.party-time .main-shell { overflow: clip; }
 .character-kit .tool-icon { background: #1b2c3d; color: #84b8e2; }

@@ -3,6 +3,7 @@
 const MAX_SPEED = 2880
 const TOP_SPEED = MAX_SPEED * 0.97
 const BOOST_SECONDS = 0.65
+const desktopPointer = window.matchMedia('(hover: hover) and (pointer: fine)')
 // Logistic growth: starts gently, accelerates, then eases into top speed.
 const accelerate = (speed: number, dt: number) => Math.min(MAX_SPEED, speed + 2.2 * (speed + 60) * (1 - speed / MAX_SPEED) * dt)
 const SPIN_UP = (() => {
@@ -375,14 +376,18 @@ class Party {
     context.restore()
   }
 
+  dispose() {
+    this.canvas.remove()
+    document.body.classList.remove('party-time')
+    if (this.main) { this.main.style.translate = ''; this.main.style.rotate = '' }
+  }
+
   /** Advances the party and returns true once it has fully faded out. */
   step(dt: number, on: boolean) {
     this.level = on ? Math.min(1, this.level + dt * 2.5) : Math.max(0, this.level - dt * 2)
     this.canvas.style.opacity = String(this.level)
     if (!on && this.level === 0) {
-      this.canvas.remove()
-      document.body.classList.remove('party-time')
-      if (this.main) { this.main.style.translate = ''; this.main.style.rotate = '' }
+      this.dispose()
       return true
     }
     this.resize()
@@ -513,6 +518,20 @@ const deactivate = (img: HTMLImageElement) => {
   setTimeout(() => { if (!tools.some(tool => tool.img === img)) img.style.animation = '' }, 350)
 }
 
+desktopPointer.addEventListener('change', () => {
+  if (desktopPointer.matches) return
+  hovered = false
+  partyAllowed = false
+  toolClock = null
+  party?.dispose()
+  party = null
+  for (const tool of tools.splice(0)) {
+    tool.img.style.rotate = ''
+    deactivate(tool.img)
+  }
+  drawFavicon(null, performance.now())
+})
+
 const frame = (now: number) => {
   const dt = Math.min((now - last) / 1000, 0.05)
   last = now
@@ -545,7 +564,7 @@ const frame = (now: number) => {
   }
   if (party?.step(dt, hovered)) party = null
   if (logo.step(dt)) { logo = null; drawFavicon(null, now); return }
-  drawFavicon(logo.angle, now)
+  if (desktopPointer.matches) drawFavicon(logo.angle, now)
   for (const tool of [...tools]) if (tool.step(dt)) {
     tools.splice(tools.indexOf(tool), 1)
     deactivate(tool.img)
@@ -553,11 +572,11 @@ const frame = (now: number) => {
   requestAnimationFrame(frame)
 }
 
-/** Spins the logo; the tool icons and the party only follow when `allowParty` (the Tools page is open). */
-export const startParty = (img: HTMLImageElement | null, allowParty: boolean) => {
-  if (!img || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  hovered = true
-  partyAllowed = allowParty
+/** Desktop hover or a tap spins the logo; only desktop can spin the tools and start the party. */
+export const startParty = (img: HTMLImageElement | null, allowParty: boolean, fromClick = false) => {
+  if (!img || (!desktopPointer.matches && !fromClick) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  hovered = desktopPointer.matches
+  partyAllowed = desktopPointer.matches && allowParty
   if (logo) return
   logo = new Spinner(img)
   last = performance.now()
@@ -601,7 +620,7 @@ export const boostParty = (img: HTMLImageElement | null, allowParty: boolean, cl
   img.animate([
     { scale: '1' }, { scale: '1.22', offset: 0.3 }, { scale: '0.96', offset: 0.7 }, { scale: '1' },
   ], { duration: 300, easing: 'ease-out' })
-  startParty(img, allowParty)
+  startParty(img, allowParty, true)
   if (party) return
   for (const spinner of [logo, ...tools]) spinner?.boost()
   if (toolClock !== null) toolClock += BOOST_SECONDS
