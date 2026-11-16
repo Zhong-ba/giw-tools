@@ -1286,7 +1286,7 @@ function App() {
       <button className="brand" type="button" title="Click to boost the spin-up"
         onMouseEnter={event => startParty(event.currentTarget.querySelector('img'), page === 'tools')}
         onMouseLeave={stopParty} onBlur={stopParty}
-        onClick={event => boostParty(event.currentTarget.querySelector('img'), page === 'tools')}>
+        onClick={event => boostParty(event.currentTarget.querySelector('img'), page === 'tools', event.detail > 0 ? event : undefined)}>
         <img className="brand-mark" src="/painmelo.png" alt="" /><span>Painmelo</span>
       </button>
       <nav aria-label="Main navigation">
