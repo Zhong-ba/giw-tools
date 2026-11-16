@@ -82,6 +82,13 @@ class CharacterInputs(Inputs):
                                       description='Fills the Advanced Properties of the talent pages, and of the passive '
                                                   'and constellation pages that deal damage, from the attack data. '
                                                   'Review titles and remove attacks the wiki does not list.')
+    data_pages: bool = Field(default=True, title='Update Combat Data Pages',
+                             description='Adds the character to the current revisions of the Elemental Gauge, Internal '
+                                         'Cooldown, Area of Effect, Hitlag and Targeting data pages. Requires Advanced '
+                                         'Properties; review the generated rows before posting.')
+    update_existing: bool = Field(default=False, title='Update Existing Entries',
+                                 description="Replaces this character's existing combat data rows. Requires Update Combat "
+                                             'Data Pages; review carefully because wiki edits and notes may be replaced.')
     normal_attack: int = Field(default=11, ge=1, le=15, title='Normal Attack')
     elemental_skill: int = Field(default=13, ge=1, le=15, title='Elemental Skill')
     elemental_burst: int = Field(default=13, ge=1, le=15, title='Elemental Burst')
@@ -207,6 +214,10 @@ def character_kit(output: Path, parameters: dict[str, JsonValue]) -> None:
         arguments.extend(['--noscaling', 'True'])
     if not inputs.advanced_properties:
         arguments.extend(['--noap', 'True'])
+    if not inputs.data_pages:
+        arguments.extend(['--nodatapages', 'True'])
+    elif inputs.update_existing:
+        arguments.append('--updateexisting')
     sys.argv = arguments
     runpy.run_path(str(ROOT / 'parseCharKit.py'), run_name='__main__')
 

@@ -66,7 +66,7 @@ def _strings(node):
             yield from _strings(value)
 
 
-def _walk(node, path, ability, attacks, events):
+def _walk(node, path, ability, attacks, events, patterns=None):
     if isinstance(node, dict):
         if isinstance(node.get('abilityName'), str):
             ability = node['abilityName']
@@ -78,10 +78,12 @@ def _walk(node, path, ability, attacks, events):
         for key, value in node.items():
             if key.lower() == 'attackinfo' and isinstance(value, dict):
                 attacks.append((ability, path + [key], value))
-            _walk(value, path + [key], ability, attacks, events)
+                if patterns is not None:
+                    patterns[id(value)] = node.get('attackPattern')
+            _walk(value, path + [key], ability, attacks, events, patterns)
     elif isinstance(node, list):
         for index, value in enumerate(node):
-            _walk(value, path + [str(index)], ability, attacks, events)
+            _walk(value, path + [str(index)], ability, attacks, events, patterns)
 
 
 def character_files(bin_path: Path, name: str) -> list[Path]:
@@ -113,13 +115,17 @@ def talent_links(config: dict, open_config: str) -> dict[str, int]:
     return links
 
 
+def icd_sequence(group: dict | None) -> list[int]:
+    """The 0/1 gauge sequence of an attenuation group; its field name is scrambled."""
+    return next((value for key, value in (group or {}).items() if key not in ('DamageSequence', 'DurabilitySequence')
+                 and isinstance(value, list) and value and all(item in (0, 1) for item in value)), [])
+
+
 def icd_type(group: dict | None) -> str:
     if not group:
         return ''
     reset = number(group.get('ResetCycle', 0))
-    # The hit pattern is the remaining 0/1 sequence; its field name is scrambled.
-    sequence = next((value for key, value in group.items() if key not in ('DamageSequence', 'DurabilitySequence')
-                     and isinstance(value, list) and value and all(item in (0, 1) for item in value)), [])
+    sequence = icd_sequence(group)
     hits = sequence.index(1, 1) if 1 in sequence[1:] else None
     if hits and all(item == (1 if index % hits == 0 else 0) for index, item in enumerate(sequence)):
         return f'{reset}s/{hits} Hits'
@@ -258,7 +264,7 @@ def _character(character_id: int, skill_depot: int | None) -> SimpleNamespace:
     files = list(dict.fromkeys(path for file_name in sorted(names) for path in character_files(bin_path, file_name)))
     return SimpleNamespace(excel=excel, avatar=avatar, depot=depot, skill_ids=skill_ids, groups=groups, proud=proud,
                            attenuation=attenuation, talent_files=talent_files, skill_configs=skill_configs, files=files,
-                           bow=avatar.get('WeaponType') in WEAPONS_WITHOUT_ELEMENT_GU)
+                           names=names, bow=avatar.get('WeaponType') in WEAPONS_WITHOUT_ELEMENT_GU)
 
 
 def _talent_config(character: SimpleNamespace, open_configs: set[str]) -> dict:
@@ -308,6 +314,44 @@ def _find_labels(info: dict, path: list, events: dict, labels: dict) -> list:
     return []
 
 
+def _value(value) -> str:
+    try:
+        return number(value)
+    except (TypeError, ValueError):
+        return '?'
+
+
+def attack_shape(pattern) -> tuple | None:
+    """(shape, radius, fan angle, box x, box z, height) of an attack's hitbox, as the Area of Effect page lists it."""
+    if not isinstance(pattern, dict):
+        return None
+    kind = pattern.get('$type')
+    if kind == 'ConfigAttackSphere':
+        return ('Sphere', _value(pattern.get('radius', 0)), '', '', '', '')
+    if kind == 'ConfigAttackCircle':
+        fan = _value(pattern.get('fanAngle', 360))
+        return ('Cylinder', _value(pattern.get('radius', 0)), '' if fan == '360' else fan, '', '',
+                _value(pattern.get('height', 0)))
+    if kind == 'ConfigAttackBox':
+        size = pattern.get('size') if isinstance(pattern.get('size'), dict) else {}
+        return ('Box', '', '', _value(size.get('x', 0)), _value(size.get('z', 0)), _value(size.get('y', 0)))
+    return None
+
+
+def _combat(info: dict, pattern) -> tuple:
+    """Element, ICD group, hitbox, and hitlag of an attack for the combat data pages. A tuple so rows stay hashable."""
+    prop = info.get('attackProperty') or {}
+    hit = info.get('hitPattern') or {}
+    element = prop.get('elementType')
+    return (
+        ('element', '' if element in (None, '', 'None', 'Physical') else str(element)),
+        ('group', str(info.get('attenuationGroup') or 'default')),
+        ('aoe', attack_shape(pattern)),
+        ('hitlag', (_value(hit.get('hitHaltTime', 0)), bool(hit.get('canBeDefenceHalt')),
+                    _value(hit['hitHaltTimeScale']) if 'hitHaltTimeScale' in hit else '')),
+    )
+
+
 def _attack_properties(info: dict, bow: bool, attenuation: dict) -> dict:
     prop = info.get('attackProperty') or {}
     attack_tag = str(info.get('attackTag') or '')
@@ -327,14 +371,14 @@ def _attack_properties(info: dict, bow: bool, attenuation: dict) -> dict:
     }
 
 
-def advanced_properties(character_id: int, skill_depot: int | None = None) -> dict[int, str]:
-    """Returns {talent skill id: {{Advanced Properties}} template} for the Normal Attack, Skill, and Burst."""
-    character = _character(character_id, skill_depot)
+def _skill_rows(character: SimpleNamespace, combat: bool = False) -> dict[str, list[dict]]:
+    """{talent key: titled rows} for the Normal Attack, Skill, and Burst. With combat, rows also carry each hit's
+    combat data, and hits that only differ in it stay separate."""
     labels = _skill_labels(character, _talent_config(character, character.skill_configs))
 
-    attacks, events = [], collections.defaultdict(list)
+    attacks, events, patterns = [], collections.defaultdict(list), {}
     for path in character.files:
-        _walk(_load(path), [], None, attacks, events)
+        _walk(_load(path), [], None, attacks, events, patterns)
 
     pages = {talent: [] for talent in TALENT_KEYS}
     seen = set()
@@ -346,11 +390,14 @@ def advanced_properties(character_id: int, skill_depot: int | None = None) -> di
         row = {'label': (talent, order, label), 'ref': ref, 'parts': parts, 'order': (order, ref, appearance),
                **_attack_properties(info, character.bow, character.attenuation)}
         key = (talent, order, ref, row['gu'], row['tag'], row['icdtype'], row['poise'], row['impulse'], row['blunt'])
+        if combat:
+            row['combat'] = _combat(info, patterns.get(id(info)))
+            key += (row['combat'],)
         if key not in seen:
             seen.add(key)
             pages[talent].append(row)
 
-    templates = {}
+    result = {}
     for talent, rows in pages.items():
         rows.sort(key=lambda row: row['order'])
         rows = _name_hits(rows)
@@ -358,10 +405,15 @@ def advanced_properties(character_id: int, skill_depot: int | None = None) -> di
             rows = _bow_rows(rows)
         _letter_duplicates(rows)
         _name_icd_tags(rows)
-        rows = _group_icd(rows)
-        if rows:
-            templates[character.skill_ids[talent]] = format_template(rows)
-    return templates
+        result[talent] = _group_icd(rows)
+    return result
+
+
+def advanced_properties(character_id: int, skill_depot: int | None = None) -> dict[int, str]:
+    """Returns {talent skill id: {{Advanced Properties}} template} for the Normal Attack, Skill, and Burst."""
+    character = _character(character_id, skill_depot)
+    return {character.skill_ids[talent]: format_template(rows)
+            for talent, rows in _skill_rows(character).items() if rows}
 
 
 def _gate_params(node: dict) -> set[str]:
@@ -433,6 +485,8 @@ def _scan(node, path: list, ability: str | None, gates: frozenset, found: Simple
             inner_variant = variant or branches and key == 'successActions'
             if key.lower() == 'attackinfo' and isinstance(value, dict):
                 found.attacks.append((ability, inner, path + [key], value, variant))
+                if hasattr(found, 'patterns'):
+                    found.patterns[id(value)] = node.get('attackPattern')
             _scan(value, path + [key], ability, inner, found, inner_variant)
     elif isinstance(node, list):
         for index, value in enumerate(node):
@@ -491,6 +545,9 @@ def _talent_rows(entries: list, scan: SimpleNamespace, gadgets: dict, character:
             continue
         row = _attack_properties(info, character.bow, character.attenuation)
         key = tuple(value for field, value in row.items() if field != 'attack_tag')
+        if hasattr(scan, 'patterns'):
+            row['combat'] = _combat(info, scan.patterns.get(id(info)))
+            key += (row['combat'],)
         if key in seen:
             continue
         seen.add(key)
@@ -505,10 +562,9 @@ def _talent_rows(entries: list, scan: SimpleNamespace, gadgets: dict, character:
     return rows
 
 
-def talent_advanced_properties(character_id: int, skill_depot: int | None = None) -> tuple[dict[int, str], dict[int, str]]:
-    """Returns ({passive proud skill group id: template}, {constellation talent id: template}) for the passives and
-    constellations that deal damage. Rows are titled after the scaling row they reuse, or else the talent's name."""
-    character = _character(character_id, skill_depot)
+def _passive_rows(character: SimpleNamespace, combat: bool = False) -> tuple[dict, dict]:
+    """({passive proud skill group id: (name, rows)}, {constellation talent id: (name, rows)}) for the passives and
+    constellations that deal damage. With combat, rows also carry each hit's combat data."""
     passives = {}
     for opens in ('InherentProudSkillOpens', 'SpecialProudSkillOpens'):
         for item in character.depot.get(opens) or []:
@@ -524,6 +580,8 @@ def talent_advanced_properties(character_id: int, skill_depot: int | None = None
     labels = _skill_labels(character, talent_config)
 
     scan = SimpleNamespace(attacks=[], mixins=[], applied=collections.defaultdict(list), gadgets=[])
+    if combat:
+        scan.patterns = {}
     for path in character.files:
         _scan(_load(path), [], None, frozenset(), scan)
     # A modifier's attacks are gated only when every application of the modifier is.
@@ -552,17 +610,40 @@ def talent_advanced_properties(character_id: int, skill_depot: int | None = None
     talent_params = [{entry.get('talentParam') for entry in talent_config.get(open_config) or []
                       if isinstance(entry, dict) and entry.get('$type') == 'UnlockTalentParam'} - {None}
                      for _, _, open_config, _ in unlock_order]
-    templates = ({}, {})
+    result = ({}, {})
     for index, (kind, talent_id, open_config, name) in enumerate(unlock_order):
         later_params = set().union(*talent_params[index + 1:]) - talent_params[index]
-        rows = _talent_rows(talent_config.get(open_config) or [], scan, gadgets, character, str(name or open_config),
+        name = str(name or open_config)
+        rows = _talent_rows(talent_config.get(open_config) or [], scan, gadgets, character, name,
                             later_params, sibling_titles, events, labels)
         _letter_duplicates(rows)
         _name_icd_tags(rows)
         rows = _group_icd(rows)
         if rows:
-            templates[kind][talent_id] = format_template(rows)
-    return templates
+            result[kind][talent_id] = (name, rows)
+    return result
+
+
+def talent_advanced_properties(character_id: int, skill_depot: int | None = None) -> tuple[dict[int, str], dict[int, str]]:
+    """Returns ({passive proud skill group id: template}, {constellation talent id: template}) for the passives and
+    constellations that deal damage. Rows are titled after the scaling row they reuse, or else the talent's name."""
+    character = _character(character_id, skill_depot)
+    return tuple({talent_id: format_template(rows) for talent_id, (_, rows) in talents.items()}
+                 for talents in _passive_rows(character))
+
+
+def combat_data(character_id: int, skill_depot: int | None = None) -> SimpleNamespace:
+    """Every hit of a character with its combat data (element, ICD group, hitbox, hitlag), for the combat data pages.
+    Rows are titled like their Advanced Properties rows; skills are {talent key: (skill id, name, rows)}."""
+    character = _character(character_id, skill_depot)
+    skill_excel = {item.get('Id'): item for item in _load(character.excel / 'AvatarSkillExcelConfigData.json')}
+    skills = {talent: (skill_id, str(skill_excel.get(skill_id, {}).get('NameTextMapHash') or ''), rows)
+              for (talent, rows), skill_id in zip(_skill_rows(character, combat=True).items(), character.skill_ids.values())}
+    passives, constellations = _passive_rows(character, combat=True)
+    return SimpleNamespace(
+        weapon=character.avatar.get('WeaponType', ''), skills=skills, passives=passives, constellations=constellations,
+        lock_shapes={talent: skill_excel.get(skill_id, {}).get('LockShape') or '' for talent, skill_id in character.skill_ids.items()},
+        attenuation=character.attenuation, names=character.names)
 
 
 def _bow_rows(rows: list[dict]) -> list[dict]:

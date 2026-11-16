@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -28,7 +29,8 @@ from webui.bot import BotManager, BotState, QueueItem, RelayLogin, RelayPost, Se
 from webui.datasets import parse_choice, prepared_datasets, resolve_choice
 from webui.jobs import Job, JobManager, QueueFullError
 from webui.references import character_references
-from webui.tools import TOOLS
+from webui.tools import TOOLS, LanguageInputs
+from webui.languages import language_results
 
 
 BUILD = r'^(current|config|[0-9a-f]{40})$'
@@ -47,6 +49,11 @@ class RunRequest(BaseModel):
 
 class TextBody(BaseModel):
     text: str = Field(max_length=1048576)
+
+
+class LanguageResult(BaseModel):
+    textmap_hash: str
+    text: str
 
 
 class ToolInfo(BaseModel):
@@ -384,6 +391,21 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
             return resolve(request)
         except (OSError, ValueError, KeyError) as error:
             raise HTTPException(409, str(error)) from error
+
+    @application.post('/api/other-languages', response_model=list[LanguageResult])
+    def other_languages(body: LanguageInputs, config: dict = Depends(prepared)):
+        try:
+            directory = Path(config['RepoPath']) / 'TextMap'
+            results = language_results(directory, data_root(profile) / 'ol', body.text.strip(), body.input_lang)
+        except (OSError, ValueError, KeyError, sqlite3.Error) as error:
+            raise HTTPException(409, f'Could not look up Other Languages: {error}') from error
+        if not results:
+            raise HTTPException(404, f'No matching name or TextMapHash found in the {body.input_lang} TextMap.')
+        return [LanguageResult(textmap_hash=result['textmap_hash'], text='\n'.join(
+            line for line in result['text'].split('\n')
+            if not (not body.translation and re.match(r'\|\w+_tl\s*=', line))
+            and not (not body.romanization and re.match(r'\|\w+_rm\s*=', line))
+        )) for result in results]
 
     @application.get('/api/characters', response_model=list[Character])
     def characters(config: dict = Depends(prepared)):

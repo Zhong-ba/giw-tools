@@ -28,6 +28,20 @@ def release_version(name: str, timeout: float = 10) -> str | None:
     return None
 
 
+def page_texts(titles, timeout: float = 20) -> dict[str, str]:
+    """{title: current wikitext} for existing pages, fetched in one request."""
+    titles = list(dict.fromkeys(titles))
+    query = urllib.parse.urlencode({'action': 'query', 'prop': 'revisions', 'rvprop': 'content', 'rvslots': 'main',
+                                    'format': 'json', 'titles': '|'.join(titles)})
+    request = urllib.request.Request(f'{API}?{query}', headers=HEADERS)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = json.load(response).get('query', {})
+    # The API normalizes titles (underscores, capitalization); map them back to the requested ones.
+    names = {item['to']: item['from'] for item in data.get('normalized') or []}
+    return {names.get(page.get('title'), page.get('title')): page['revisions'][0]['slots']['main']['*']
+            for page in (data.get('pages') or {}).values() if page.get('revisions')}
+
+
 def date_versions(dates, timeout: float = 10) -> dict[str, str]:
     """{YYYY-MM-DD: version} from the wiki's {{Date to Version}} (e.g. 7.2 or Luna III), in one request. Dates after the
     newest release the template knows get that release, as on the wiki."""

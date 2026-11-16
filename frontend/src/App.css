@@ -1,4 +1,4 @@
-@layer base {
+﻿@layer base {
   :root { color-scheme: dark; font-family: Inter, "Segoe UI", Arial, sans-serif; color: #e4e8ee; background: #0f151f; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; font-size: 14px; }
   * { box-sizing: border-box; }
   body { margin: 0; min-width: 360px; }
@@ -235,8 +235,8 @@ body.party-time .main-shell { overflow: clip; }
 .json-view code { display: block; font: inherit; will-change: transform; }
 .json-line { height: 21px; }
 .json-line.marked { margin: 0 -18px; padding: 0 18px 0 16px; border-left: 2px solid #ffcb6b; background: rgba(255, 203, 107, 0.09); }
-.json-view mark { background: rgba(130, 170, 255, 0.28); color: inherit; border-radius: 2px; box-shadow: 0 0 0 1px rgba(130, 170, 255, 0.45); }
-.json-view mark.active { background: #ffcb6b; color: #1a1306; box-shadow: 0 0 0 1px #ffcb6b; }
+.json-view mark, .text-preview mark { background: rgba(130, 170, 255, 0.28); color: inherit; border-radius: 2px; box-shadow: 0 0 0 1px rgba(130, 170, 255, 0.45); }
+.json-view mark.active, .text-preview mark.active { background: #ffcb6b; color: #1a1306; box-shadow: 0 0 0 1px #ffcb6b; }
 .reference-search { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 16px; border-bottom: 1px solid #1f2c40; background: #121c2a; color: #6f7987; }
 .reference-search input { flex: 1; min-width: 0; background: #0e151f; border: 1px solid #2c3b51; border-radius: 5px; color: #e4e8ee; padding: 5px 8px; font-size: 12px; }
 .reference-search input:focus { outline: none; border-color: #4e76ba; }
@@ -271,6 +271,25 @@ body.party-time .main-shell { overflow: clip; }
 .preview-header em { color: #e0b860; font-style: normal; }
 .preview-header > div { display: flex; gap: 6px; align-items: center; }
 .text-preview { margin: 0; padding: 16px 18px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; font-size: 12px; line-height: 1.75; color: #cfd4dc; font-variant-ligatures: none; }
+.ol-screen { display: flex; flex-direction: column; gap: 20px; }
+.ol-query { display: grid; grid-template-columns: minmax(0, 1fr) 130px auto; gap: 12px; align-items: end; margin: 16px 0; }
+.ol-options { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.ol-options fieldset { margin: 0; border: 1px solid #283952; border-radius: 6px; padding: 12px; min-width: 0; }
+.ol-options legend { font-size: 12px; color: #c4cbd6; padding: 0 5px; }
+.ol-options label { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 0; cursor: pointer; }
+.ol-options input { accent-color: #5c93f3; }
+.ol-results { display: flex; flex-direction: column; gap: 14px; }
+.ol-results > h3 { font-size: 14px; color: #a3bce6; }
+.ol-result summary { display: list-item; padding: 14px 18px; color: #9aa3b0; font-size: 12px; }
+.ol-result summary code { color: #e4e8ee; }
+.ol-result summary button { float: right; margin-top: -6px; }
+.ol-result-actions { display: flex; gap: 15px; justify-content: flex-end; padding: 0 18px 6px; }
+.ol-result .text-preview { background: #101824; border-top: 1px solid #253041; }
+@media (max-width: 640px) {
+  .ol-query { grid-template-columns: minmax(0, 1fr) auto; }
+  .ol-query > .field:first-child { grid-column: 1 / -1; }
+  .ol-options { grid-template-columns: 1fr; }
+}
 .code-editor { position: relative; flex: 1; min-height: 0; }
 .code-editor > pre, .code-editor > textarea { position: absolute; inset: 0; margin: 0; border: 0; padding: 16px 18px; font: 12px/1.75 "Cascadia Code", Consolas, monospace; font-variant-ligatures: none; letter-spacing: 0; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; scrollbar-gutter: stable; }
 .code-layer { color: #cfd4dc; pointer-events: none; overflow: hidden !important; }

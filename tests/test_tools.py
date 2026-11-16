@@ -1,4 +1,4 @@
-import contextlib
+﻿import contextlib
 import importlib
 import io
 import json
@@ -250,6 +250,152 @@ class ToolTests(unittest.TestCase):
             self.character_tool('--noap', 'True')
         advanced.assert_not_called()
         talents.assert_not_called()
+
+    def test_character_kit_data_pages(self):
+        import advancedProperties
+        import combatPages
+        pages = ({'Hitlag/Data': 'new revision'}, ['Hitlag/Data > Sword Characters: added 1 row'])
+        with patch.object(advancedProperties, 'advanced_properties', return_value={}), \
+                patch.object(advancedProperties, 'talent_advanced_properties', return_value=({}, {})), \
+                patch.object(combatPages, 'combat_pages', return_value=pages) as combat:
+            self.character_tool('--skilldepot', '101')
+            combat.assert_called_once_with(10000001, 101, 'Tester', update_existing=False)
+            self.assertEqual(self.read_output('Tester/Data Pages/Hitlag Data.wikitext'),
+                             '<%-- [PAGE_INFO]\n    pageTitle = #Hitlag/Data#\n[END_PAGE_INFO] --%>\n\nnew revision')
+            self.assertIn('Sword Characters: added 1 row', self.stdout.getvalue())
+            combat.reset_mock()
+            self.character_tool('--updateexisting')
+            combat.assert_called_once_with(10000001, None, 'Tester', update_existing=True)
+            from webui.tools import character_kit
+            combat.reset_mock()
+            with patch.object(sys, 'argv', []):
+                character_kit(self.output, {'character_id': 10000001, 'version': '1.0', 'skill_depot': 101,
+                                            'attribute_scaling': False, 'update_existing': True})
+            combat.assert_called_once_with(10000001, 101, 'Tester', update_existing=True)
+            combat.side_effect = OSError('offline')
+            self.character_tool()
+            self.assertIn('Combat data pages skipped: offline', self.stdout.getvalue())
+            combat.reset_mock()
+            self.character_tool('--nodatapages', 'True')
+            self.character_tool('--noap', 'True')
+        combat.assert_not_called()
+
+    def test_combat_data_pages_insert_rows(self):
+        import combatPages as cp
+
+        def row(title, gu, icd, tag, group, aoe, hitlag, element='Fire'):
+            return {'title': title, 'gu': gu, 'icdtag': icd, 'attack_tag': tag,
+                    'combat': (('element', element), ('group', group), ('aoe', aoe), ('hitlag', hitlag))}
+
+        sphere = lambda radius: ('Sphere', radius, '', '', '', '')
+        data = types.SimpleNamespace(
+            weapon='WEAPON_SWORD_ONE_HAND', passives={}, names={'Tester'},
+            constellations={1: ('Sun Rite', [row('Sun Rite Lunar-Charged', '0U', 'none', 'MoonShock', 'default', None, ('0', False, ''))])},
+            lock_shapes={'E': 'CircleLockEnemyR10H5HC'}, attenuation={'Tester_Skill': {'ResetCycle': 2.5, 'Seq': [1, 0, 0]}},
+            skills={'NA': (1, 'Strike', [row('1-Hit', '1U', 'Normal Attack', 'Normal', 'default', None, ('0.06', True, ''), element=''),
+                                         row('2-Hit', '1U', 'Normal Attack', 'Normal', 'default', None, ('0.12', True, '')),
+                                         row('Charged Attack Stellar-Conduct', '0U', 'none', 'StarSuperconductor', 'default', None, ('0', False, ''))]),
+                    'E': (2, 'Skill', [row('Skill DMG A', '2U', 'Elemental Skill', 'Elemental_Art', 'Tester_Skill', sphere('3'), ('0', False, '')),
+                                       row('Skill DMG B', '2U', 'Elemental Skill', 'Elemental_Art', 'Tester_Skill', sphere('4'), ('0', False, '')),
+                                       row('Stellar DMG', '0U', 'none', 'StarSwirl', 'default', sphere('9'), ('0', False, ''))])})
+
+        def table(heading, *names):
+            return (f'=={heading}==\n{{| class="wikitable"\n! Character !! Talent\n'
+                    + ''.join(f'|-\n| {{{{Character|{name}|50}}}} || x\n' for name in names) + '|}\n')
+
+        texts = {
+            cp.GAUGE: table('Pyro', 'Albedo', 'Zhongli'),
+            cp.ICD: "==ICD Types==\n{|\n! Type !! Reset !! Sequence\n|-\n| Default || 2.5 || '''''1 0 0''''' as the repetend\n|}\n"
+                    + table('Character Charged Attacks', 'Albedo') + table('Character Elemental Skills', 'Albedo'),
+            cp.AOE: table('Elemental Skills', 'Zhongli'),
+            cp.HITLAG: '==Sword Characters==\n{|\n! Character !! Attack !! Hitlag !! Extend !! Scale\n|-\n'
+                       '| rowspan="2" | Most Sword Characters || Normal Attack 1 || 0.06 || {{check|yes}} || 0.01\n|-\n'
+                       '| Normal Attack 2 || 0.1 || {{check|yes}} || 0.01\n|}\n',
+            cp.TARGETING: table('Sword Characters', 'Tester'),
+        }
+        pages, log = cp.update_pages('Tester', data, texts)
+        # Alphabetical, one row per value; only hits with an elementType (not physical ones, which may be infused),
+        # with reaction-only rows labelled (without the constellation's own name).
+        self.assertIn('| {{Character|Albedo|50}} || x\n|-\n| rowspan="5" style="text-align:center;" | {{Character|Tester|50}} || '
+                      '{{Talent|Strike|type=1|nobr=1|20}} (Normal) || 1U\n|-\n'
+                      '| {{Talent|Strike|type=1|nobr=1|20}} (Stellar-Conduct) || 0U\n|-\n'
+                      '| {{Talent|Skill|type=1|nobr=1|20}} (Skill DMG) || 2U\n|-\n'
+                      '| {{Talent|Skill|type=1|nobr=1|20}} (Stellar DMG) || 0U\n|-\n'
+                      '| {{Constellation|Sun Rite|level=1|nobr=1|20}} (Lunar-Charged) || 0U\n|-\n| {{Character|Zhongli|50}}', pages[cp.GAUGE])
+        # The character's own ICD group becomes a new type named after them.
+        self.assertIn("| Tester || 2.5 || Only the 1st is '''''1''''', others are 0\n|}", pages[cp.ICD])
+        self.assertIn('|-\n| rowspan="2" | {{Character|Tester|20|nobr=1}} || {{Talent|Skill|20|nobr=1|type=1}} (Skill DMG) || '
+                      'Elemental Skill || Tester\n|-\n| {{Talent|Skill|20|nobr=1|type=1}} (Stellar DMG) || '
+                      'colspan="2" | <small>(No ICD)</small>\n|}', pages[cp.ICD])
+        self.assertIn('| {{Character|Tester|20|nobr=1}} || {{Talent|Strike|20|nobr=1|text=Charged Attack}} (Stellar-Conduct) || '
+                      'colspan="2" | <small>(No ICD)</small>\n|}', pages[cp.ICD])
+        # Reaction hits have no hitbox of their own.
+        self.assertIn('(Skill DMG A) || Sphere || 3 ||', pages[cp.AOE])
+        self.assertNotIn('Stellar', pages[cp.AOE])
+        # Hits matching the "Most ... Characters" defaults are left out.
+        self.assertIn('| style="text-align:center" | {{Character|Tester|50}} || Normal Attack 2 || 0.12 || {{check|yes}} || 0.01\n|}',
+                      pages[cp.HITLAG])
+        self.assertNotIn(cp.TARGETING, pages)
+        self.assertIn('Targeting/Data > Sword Characters: already listed', log)
+        self.assertEqual(cp.update_pages('Tester', data, pages | {cp.TARGETING: texts[cp.TARGETING]})[0], {})
+        self.assertEqual(cp.sequence_text([1, 0, 1, 0]), "'''''1 0''''' as the repetend")
+
+    def test_combat_data_pages_replace_existing_rows(self):
+        import combatPages as cp
+
+        before = ('Intro\n==Sword Characters==\n{|\n! Character !! Attack\n'
+                  '|-\n| {{Character|Albedo|50}} || untouched\n'
+                  '|-\n| rowspan="2" | {{Character|Tester|50}} || old first\n'
+                  '|-\n| old continuation\n'
+                  '|-\n| {{Character|Zhongli|50}} || untouched\n|}\nAfter\n')
+        rows = ['| {{Character|Tester|50}} || new']
+        updated, log = cp.insert_rows(before, 'Sword Characters', 'Tester', lambda _: rows, True)
+        expected = before.replace('| rowspan="2" | {{Character|Tester|50}} || old first\n'
+                                  '|-\n| old continuation', rows[0])
+        self.assertEqual(updated, expected)
+        self.assertEqual(log, 'updated 1 row')
+        self.assertEqual(cp.insert_rows(updated, 'Sword Characters', 'Tester', lambda _: rows, True)[0], updated)
+        self.assertEqual(cp.insert_rows(before, 'Sword Characters', 'Tester', lambda _: rows)[0], before)
+        last = before.replace('{{Character|Zhongli|50}}', 'Most Sword Characters')
+        removed, _ = cp.insert_rows(last, 'Sword Characters', 'Tester', lambda _: None, True)
+        self.assertIn('|-\n| Most Sword Characters || untouched\n|}\nAfter\n', removed)
+        self.assertNotIn('Tester', removed)
+        self.assertNotIn('old continuation', removed)
+
+    def test_combat_icd_charged_attack_defaults(self):
+        import combatPages as cp
+
+        text = ("==ICD Types==\n{|\n| Default || 2.5 || '''''1 0 0''''' as the repetend\n"
+                "|-\n| Thrusting Attack || 0.5 || '''''1 0''''' as the repetend\n|}\n"
+                '==Character Charged Attacks==\n{|\n! Character !! Talent !! Tag !! Type\n|-\n'
+                '| Most [[Sword]]/[[Claymore]] Characters || Charged Attack || Normal Attack || Default\n|-\n'
+                '| Most [[Polearm]] Characters || Charged Attack || Charged Attack || Thrusting Attack\n|-\n'
+                '| Most [[Catalyst]]/[[Bow]] Characters || Charged Attack || colspan="2" | <small>(No ICD)</small>\n|}\n')
+        cases = [
+            ('WEAPON_CATALYST', 'none', 'default', 'Extra', False),
+            ('WEAPON_BOW', 'none', 'default', 'Extra', False),
+            ('WEAPON_SWORD_ONE_HAND', 'Normal Attack', 'default', 'Normal', False),
+            ('WEAPON_CLAYMORE', 'Normal Attack', 'default', 'Normal', False),
+            ('WEAPON_POLE', 'Charged Attack', 'Thrust', 'Extra', False),
+            ('WEAPON_CATALYST', 'Charged Attack', 'default', 'Extra', True),
+            ('WEAPON_SWORD_ONE_HAND', 'none', 'default', 'Extra', True),
+            ('WEAPON_CATALYST', 'none', 'default', 'StarSwirl', True),
+        ]
+        for weapon, tag, group, attack_tag, included in cases:
+            with self.subTest(weapon=weapon, tag=tag, group=group, attack_tag=attack_tag):
+                row = {'title': 'Charged Attack', 'icdtag': tag, 'attack_tag': attack_tag,
+                       'combat': (('element', 'Ice'), ('group', group))}
+                data = types.SimpleNamespace(weapon=weapon, names={'Tester'}, passives={}, constellations={},
+                                             skills={'NA': (1, 'Strike', [row])},
+                                             attenuation={'Thrust': {'ResetCycle': 0.5, 'Seq': [1, 0, 1, 0]}})
+                updated = cp.icd_page(text, 'Tester', data, cp._hits(data), [])
+                self.assertEqual('{{Character|Tester|' in updated, included)
+                if not included:
+                    self.assertEqual(updated, text)
+                    old = text.replace(
+                        '| Most [[Sword]]', '| {{Character|Tester|20}} || old\n|-\n| Most [[Sword]]')
+                    regenerated = cp.icd_page(old, 'Tester', data, cp._hits(data), [], True)
+                    self.assertNotIn('{{Character|Tester|', regenerated)
 
     def test_talent_advanced_properties_from_binoutput(self):
         def attack(damage, tag='Elemental_Art', **prop):

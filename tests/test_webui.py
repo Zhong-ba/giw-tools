@@ -118,6 +118,86 @@ class WebTests(unittest.TestCase):
         self.assertEqual(failed['files'], [])
         self.assertIn('not found', self.client.get(f"/api/jobs/{failed['id']}/logs").json()['text'])
 
+    def test_language_lookup_without_jobs(self):
+        for language in LANGUAGES:
+            values = {'101': 'Ambre' if language == 'FR' else 'Amber',
+                      '102': 'Ambre' if language == 'FR' else 'Amber',
+                      '103': 'Mineral' if language == 'FR' else 'Amber'}
+            (self.dataset / 'TextMap' / f'TextMap{language}.json').write_text(json.dumps(values), encoding='utf-8')
+        response = self.client.post('/api/other-languages', json={'text': 'aMbEr'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([item['textmap_hash'] for item in response.json()], ['101', '103'])
+        self.assertIn('|fr       = Mineral', response.json()[1]['text'])
+        self.assertIn('|fr_tl', response.json()[0]['text'])
+        by_hash = self.client.post('/api/other-languages', json={'text': '102', 'translation': False})
+        self.assertEqual(by_hash.json()[0]['textmap_hash'], '102')
+        self.assertNotIn('|fr_tl', by_hash.json()[0]['text'])
+        localized = self.client.post('/api/other-languages', json={'text': 'ambre', 'input_lang': 'FR'})
+        self.assertEqual([item['textmap_hash'] for item in localized.json()], ['101'])
+        self.assertEqual(self.client.post('/api/other-languages', json={'text': 'Missing'}).status_code, 404)
+        self.assertEqual(self.client.post('/api/other-languages', json={'text': '  '}).status_code, 422)
+        self.assertEqual(self.client.post('/api/other-languages', json={'text': 'Amber', 'input_lang': 'XX'}).status_code, 422)
+        self.assertEqual(self.client.get('/api/jobs').json(), [])
+
+    def test_language_lookup_refreshes_changed_textmaps_and_reports_errors(self):
+        first = self.client.post('/api/other-languages', json={'text': 'Amber'})
+        self.assertEqual(first.status_code, 200, first.text)
+        french = self.dataset / 'TextMap' / 'TextMapFR.json'
+        french.write_text('{"101": "Updated French"}', encoding='utf-8')
+        second = self.client.post('/api/other-languages', json={'text': 'Amber'})
+        self.assertIn('|fr       = Updated French', second.json()[0]['text'])
+        french.write_text('[]', encoding='utf-8')
+        invalid = self.client.post('/api/other-languages', json={'text': 'Amber'})
+        self.assertEqual(invalid.status_code, 409)
+        self.assertIn('mapping', invalid.json()['detail'])
+        import sqlite3
+        index = next((self.root / '.data' / 'ol').glob('*.sqlite3'))
+        with sqlite3.connect(index) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT text FROM texts WHERE identifier = '101' AND language = 'FR'"
+            ).fetchone()[0], 'Updated French')
+        french.unlink()
+        self.assertEqual(self.client.post('/api/other-languages', json={'text': 'Amber'}).status_code, 409)
+
+    def test_language_index_reused_for_new_queries_after_restart(self):
+        first = self.client.post('/api/other-languages', json={'text': 'Amber'})
+        self.assertEqual(first.status_code, 200, first.text)
+        with patch('webui.languages._load_textmap', side_effect=AssertionError('TextMaps were reloaded')):
+            by_hash = self.client.post('/api/other-languages', json={'text': '101'})
+            self.assertEqual(by_hash.json()[0]['textmap_hash'], '101')
+            with TestClient(create_app(self.config, self.root / 'restart-jobs', self.root / 'no-frontend')) as restarted:
+                localized = restarted.post('/api/other-languages', json={'text': 'ambre', 'input_lang': 'FR'})
+                self.assertEqual(localized.status_code, 200, localized.text)
+                self.assertIn('|en       = Amber', localized.json()[0]['text'])
+                self.assertEqual(restarted.get('/api/jobs').json(), [])
+
+    def test_language_index_concurrent_builds_and_dataset_isolation(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        from webui import languages
+
+        cache = self.root / '.data' / 'ol'
+        directory = self.dataset / 'TextMap'
+        barrier = Barrier(2)
+
+        def lookup(text):
+            barrier.wait(timeout=10)
+            return languages.language_results(directory, cache, text, 'EN')
+
+        with patch.object(languages, '_load_textmap', wraps=languages._load_textmap) as load:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                outputs = list(executor.map(lookup, ['Amber', '101']))
+            self.assertEqual(outputs[0], outputs[1])
+            self.assertEqual(load.call_count, len(LANGUAGES))
+
+        other = self.root / 'other-dataset' / 'TextMap'
+        other.mkdir(parents=True)
+        for language in LANGUAGES:
+            (other / f'TextMap{language}.json').write_text('{"201": "Other"}', encoding='utf-8')
+        self.assertEqual(languages.language_results(other, cache, 'Other', 'EN')[0]['textmap_hash'], '201')
+        self.assertEqual(languages.language_results(other, cache, 'Amber', 'EN'), [])
+        self.assertEqual(languages.language_results(directory, cache, 'Amber', 'EN')[0]['textmap_hash'], '101')
+
     def test_textmaps_load_once_per_session_and_jobs_keep_own_config(self):
         first = self.wait(self.client.post('/api/jobs', json={
             'tool_id': 'other-languages', 'parameters': {'text': 'Amber'},

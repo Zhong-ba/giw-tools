@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
 import {
-  ArrowDownToLine, ArrowRight, BookOpen, Bot, Braces, ChartColumn, Check, ChevronDown, ChevronRight, ChevronUp, ChevronsUp, CircleAlert, Clock3, CookingPot, Copy, Crosshair, Database,
+  ArrowDownToLine, ArrowRight, BookOpen, Bot, Braces, ChartColumn, Check, ChevronRight, ChevronsUp, CircleAlert, Clock3, CookingPot, Copy, Crosshair, Database,
     FileText, Fish, FolderOpen, Image as ImageIcon, KeyRound, LayoutGrid, Link2, ListPlus, LoaderCircle, Maximize2, Minimize2, Pencil, Play,
     RotateCcw, Save, Scale, Search, Send, Square, Terminal, Trash2, X,
 } from 'lucide-react'
@@ -16,6 +16,9 @@ import { findJson, sortKeys } from './json'
 import { JsonView } from './JsonView'
 import type { JsonHit } from './JsonView'
 import { startParty, stopParty } from './party'
+import { findMatches, markMatches, useFindShortcut } from './search'
+import { SearchBar } from './SearchBar'
+import { OtherLanguages } from './OtherLanguages'
 
 const icons: Record<string, typeof BookOpen> = { 'other-languages': CrescentBird, 'character-kit': BearFace, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, redirects: Link2, enemy: HornedMask,
   bounties: Crosshair, 'fishing-points': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianLotus }
@@ -394,8 +397,8 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
   </Dialog>
 }
 
-function FilePreview({ jobId, file, editable, onDirty }: {
-  jobId: string; file: Artifact; editable: boolean; onDirty: (dirty: boolean) => void
+function FilePreview({ jobId, file, editable, shortcut, onDirty }: {
+  jobId: string; file: Artifact; editable: boolean; shortcut: boolean; onDirty: (dirty: boolean) => void
 }) {
   const [text, setText] = useState('')
   const [draft, setDraft] = useState<string | null>(null)
@@ -431,6 +434,22 @@ function FilePreview({ jobId, file, editable, onDirty }: {
     finally { setSaving(false) }
   }
   const cancel = () => { if (draft === text || window.confirm('Discard unsaved changes?')) edit(null) }
+  const [searching, setSearching] = useState(false)
+  const [query, setQuery] = useState('')
+  const [hitIndex, setHitIndex] = useState(0)
+  const searchInput = useRef<HTMLInputElement>(null)
+  const preview = useRef<HTMLPreElement>(null)
+  const searchable = kind === 'text' && !loading && draft === null && !!text
+  const needle = searching && searchable ? query.toLowerCase() : ''
+  const hits = useMemo(() => findMatches(text, needle), [text, needle])
+  const activeHit = hits.length ? hits[Math.min(hitIndex, hits.length - 1)] : undefined
+  const step = (direction: number) => { if (hits.length) setHitIndex((Math.min(hitIndex, hits.length - 1) + direction + hits.length) % hits.length) }
+  const openSearch = useCallback(() => { setSearching(true); requestAnimationFrame(() => searchInput.current?.select()) }, [])
+  useFindShortcut(shortcut && searchable, openSearch)
+  const highlighted = useMemo(() => wikitext ? highlightWikitext(text) : isLua(path) ? highlightLua(text) : [text], [text, wikitext, path])
+  useEffect(() => {
+    preview.current?.querySelector('mark.active')?.scrollIntoView({ block: 'center', inline: 'nearest' })
+  }, [activeHit, needle])
   return <div className="preview-panel">
     <div className="preview-header"><span title={path}>{path.split('/').pop()}{draft !== null && draft !== text && <em> · Unsaved</em>}</span><div>
       {draft !== null ? <>
@@ -440,15 +459,18 @@ function FilePreview({ jobId, file, editable, onDirty }: {
         </button>
       </> : <>
         {editable && wikitext && !loading && !error && <button className="icon-button" onClick={() => edit(text)} aria-label="Edit file" title="Edit"><Pencil size={16} /></button>}
+        {searchable && <button className="icon-button" onClick={openSearch} aria-label="Search file" title="Search (Ctrl+F)"><Search size={16} /></button>}
         {kind === 'text' && text && <button className="icon-button" onClick={() => { void copy() }} aria-label="Copy output" title="Copy">{copied ? <Check size={16} /> : <Copy size={16} />}</button>}
         {url && <a className="icon-button" href={url} download={path.split('/').pop()} aria-label="Download file" title="Download"><ArrowDownToLine size={17} /></a>}
       </>}
     </div></div>
     {error && <div className="error-box" role="alert">{error}</div>}
+    {searching && searchable && <SearchBar inputRef={searchInput} label="Search file" query={query} count={hits.length} index={hitIndex}
+      onQuery={value => { setQuery(value); setHitIndex(0) }} onStep={step} onClose={() => setSearching(false)} />}
     {loading ? <div className="empty"><LoaderCircle className="spin" />Loading preview...</div> :
       draft !== null ? <WikitextEditor value={draft} onChange={edit} onSave={() => { void save() }} /> :
         kind === 'image' ? <div className="image-preview">{url && <img src={hosted() ? url : `${url}?inline=true`} alt={path} />}</div> :
-          kind === 'text' ? <pre className="text-preview">{wikitext ? highlightWikitext(text) : isLua(path) ? highlightLua(text) : text}</pre> :
+          kind === 'text' ? <pre ref={preview} className="text-preview">{markMatches(highlighted, hits, needle.length, activeHit)}</pre> :
             <div className="empty"><ArrowDownToLine /><p>No preview available. Download to open.</p></div>}
   </div>
 }
@@ -550,18 +572,9 @@ function ReferencePanel({ jobId, onClose }: { jobId: string; onClose: () => void
   }, [needle, view])
   const activeHit = hits.length ? hits[Math.min(hitIndex, hits.length - 1)] : undefined
   const step = (direction: number) => { if (hits.length) setHitIndex((Math.min(hitIndex, hits.length - 1) + direction + hits.length) % hits.length) }
+  const openSearch = useCallback(() => { setSearching(true); requestAnimationFrame(() => searchInput.current?.select()) }, [])
   // Ctrl+F searches the game data instead of the page while this panel is open.
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {
-        event.preventDefault()
-        setSearching(true)
-        requestAnimationFrame(() => searchInput.current?.select())
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  useFindShortcut(true, openSearch)
   const choose = (next: () => void) => { setCopied(false); setFocus(null); next() }
   const copy = async () => {
     try { await navigator.clipboard.writeText(view.lines.join('\n')); setCopied(true) }
@@ -577,7 +590,7 @@ function ReferencePanel({ jobId, onClose }: { jobId: string; onClose: () => void
         </optgroup>)}
       </select> : <span>Game Data{character && ` · ${character}`}</span>}
       <div>
-        {text && !loading && <button className="icon-button" onClick={() => { setSearching(true); requestAnimationFrame(() => searchInput.current?.select()) }} aria-label="Search game data" title="Search (Ctrl+F)"><Search size={16} /></button>}
+        {text && !loading && <button className="icon-button" onClick={openSearch} aria-label="Search game data" title="Search (Ctrl+F)"><Search size={16} /></button>}
         {text && !loading && <button className="icon-button" onClick={() => { void copy() }} aria-label="Copy game data" title={current ? 'Copy filtered data' : 'Copy'}>{copied ? <Check size={16} /> : <Copy size={16} />}</button>}
         <button className="icon-button" onClick={onClose} aria-label="Hide game data" title="Hide game data"><X size={16} /></button>
       </div>
@@ -587,19 +600,8 @@ function ReferencePanel({ jobId, onClose }: { jobId: string; onClose: () => void
       {available.map(item => <button key={item.id} className={current?.id === item.id ? 'selected' : ''} aria-pressed={current?.id === item.id}
         title={item.title} onClick={() => choose(() => setFilter(item.id))}>{item.label} <span>{matches[item.id].length}</span></button>)}
     </div>}
-    {searching && <div className="reference-search" role="search">
-      <Search size={14} />
-      <input ref={searchInput} autoFocus aria-label="Search game data" placeholder="Search game data" value={query}
-        onChange={event => { setQuery(event.target.value); setHitIndex(0) }}
-        onKeyDown={event => {
-          if (event.key === 'Enter') { event.preventDefault(); step(event.shiftKey ? -1 : 1) }
-          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setSearching(false) }
-        }} />
-      <span className="reference-search-count">{needle ? hits.length ? `${Math.min(hitIndex, hits.length - 1) + 1} / ${hits.length.toLocaleString()}` : 'No results' : ''}</span>
-      <button className="icon-button" onClick={() => step(-1)} disabled={!hits.length} aria-label="Previous match" title="Previous (Shift+Enter)"><ChevronUp size={15} /></button>
-      <button className="icon-button" onClick={() => step(1)} disabled={!hits.length} aria-label="Next match" title="Next (Enter)"><ChevronDown size={15} /></button>
-      <button className="icon-button" onClick={() => setSearching(false)} aria-label="Close search" title="Close (Esc)"><X size={15} /></button>
-    </div>}
+    {searching && <SearchBar inputRef={searchInput} label="Search game data" query={query} count={hits.length} index={hitIndex}
+      onQuery={value => { setQuery(value); setHitIndex(0) }} onStep={step} onClose={() => setSearching(false)} />}
     {error && <div className="error-box" role="alert">{error}</div>}
     {current?.id === 'attackInfo' && view.toc.length > 0 && !loading && <details className="reference-toc" open>
       <summary>Contents <span>{view.toc.length}</span></summary>
@@ -703,7 +705,7 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
           </div>)}
         </div>
         {selectedFile && <FilePreview key={selectedFile.path} jobId={job.id} file={selectedFile} editable={!active(job)}
-          onDirty={value => { dirty.current = value }} />}
+          shortcut={!(references && hasReferences)} onDirty={value => { dirty.current = value }} />}
         {references && hasReferences && <ReferencePanel jobId={job.id} onClose={() => setReferences(false)} />}
       </div>}
   </Dialog>
@@ -1321,7 +1323,9 @@ function App() {
         </>}
       </main>
     </div>
-    {selectedTool && <ToolForm key={selectedTool.id} tool={selectedTool} characters={characters} characterError={characterError} submitting={submitting} error={formError} onSubmit={parameters => { void run(parameters) }} onClose={() => setSelectedTool(null)} />}
+    {selectedTool && (selectedTool.id === 'other-languages'
+      ? <Dialog title="Other Languages" wide onClose={() => setSelectedTool(null)}><OtherLanguages /></Dialog>
+      : <ToolForm key={selectedTool.id} tool={selectedTool} characters={characters} characterError={characterError} submitting={submitting} error={formError} onSubmit={parameters => { void run(parameters) }} onClose={() => setSelectedTool(null)} />)}
     {currentJob && <JobDialog key={currentJob.id} job={currentJob} onClose={() => setSelectedJob(null)} onDelete={() => deleteJob(currentJob)}
       onQueued={open => { void refresh(); if (open) { setSelectedJob(null); setPage('bot') } }} />}
     {pendingDelete && <Dialog title={pendingDelete.length === 1 ? 'Delete Job?' : `Delete ${pendingDelete.length} Jobs?`} expandable={false} onClose={() => { if (!deleting) setPendingDelete(null) }}>

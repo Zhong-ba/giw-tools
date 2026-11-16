@@ -57,6 +57,7 @@ export interface Dataset {
 export interface Revision { commit: string; title: string; date: string; downloaded: boolean }
 export interface Character { id: number; name: string; skill_depot: number | null }
 export interface PickerItem { id: number; name: string; internal: string }
+export interface LanguageResult { textmap_hash: string; text: string }
 export interface Versions { options: { value: string; label: string; version: string | null }[]; older: string | null; newer: string }
 export interface BotSettings {
   wiki: string

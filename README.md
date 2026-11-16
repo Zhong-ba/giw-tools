@@ -165,7 +165,7 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   change it under **Working Directory** on the Dataset page). Your configured `OutputPath` is not
   modified. Inputs and the resolved dataset are snapshotted for each tool job, and
   config-dependent modules are re-imported for every job.
-- The TextMaps used by Other Languages (also used by Character Kit) are loaded the
+- The TextMaps used by tool jobs (including Character Kit) are loaded the
   first time a tool needs them and then kept in memory until the server stops
   (about 3.5 GB). They reload automatically when a new dataset revision is active.
   Dataset setup runs in its own process and releases the loaded TextMaps first.
@@ -174,7 +174,19 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
 - Job history and outputs survive restarts. Interrupted jobs are marked failed;
   they are not silently retried. Shutdown waits for queued/running jobs to finish.
   Logs show real tool progress; no estimated percentage is fabricated.
-- Other Languages uses exact TextMap matches and the original formatter.
+- Other Languages opens a dedicated generator instead of creating a job. Look up
+  an exact name (case insensitive) in the chosen language, or enter a TextMapHash.
+  Each distinct set of localized names gets a collapsible result card with Copy,
+  translation (`_tl`), romanization (`_rm`), and optional section-header controls.
+  Repeated hashes with identical localized names are shown once. Results use the
+  original formatter, shared with the desktop tool. A persistent SQLite index under
+  `.data/ol` beside the profile makes new name/hash lookups fast without keeping
+  another multi-GB copy of the TextMaps in RAM. Each dataset has its own index, reused
+  across server restarts and rebuilt transactionally when its TextMaps change.
+  The first lookup builds the index; to prepare the active dataset before serving
+  users, run `python -m webui.languages` (in Docker: `docker exec <container> python -m webui.languages`).
+  Allow extra disk space for the indexes and rebuilding them. The existing OL job
+  API remains available for compatibility.
   Character Kit uses the original generator.
   Icon generation (and the icon background element) is hidden in the web UI
   while `IMAGE_ASSETS = False` in `webui/tools.py`, until an updated texture
@@ -225,6 +237,28 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   sections empty. The Traveler needs a skill depot override. A Normal
   Attack/Skill/Burst with no attacks (e.g. Itto's Burst) gets no Advanced
   Properties section; with `--noap` or when generation fails, the sections stay empty.
+- From the same attack data, Character Kit also adds the character to the current
+  revisions of Elemental Gauge Theory/Character Data, Internal Cooldown/Data,
+  Area of Effect, Hitlag/Data and Targeting/Data (`combatPages.py`),
+  written to `Data Pages/` in the character's output folder (only pages that change).
+  Rows go in alphabetically in each table: per-element gauge rows (only hits whose
+  attackInfo has an `elementType`, Normal Attack talents included; physical hits that
+  infusions convert are covered by the page's note, and Normal Attack rows are always
+  labelled), ICD rows per section (plus a new ICD Types row for the character's own ICD
+  groups; rows of only reaction hits are labelled on both pages, e.g. "(Lunar-Charged)"), hitboxes of
+  Skill/Burst/passive/constellation hits (not reaction hits), Normal/Charged Attack
+  hitlag (never plunges) that differs from the "Most ... Characters" defaults, and the Skill/Burst
+  targeting cylinder. Tables that already list the character are left untouched by
+  default. Tick **Update Existing Entries** (CLI: `--updateexisting`) to replace the
+  selected character's rows in the generated tables, without changing other characters.
+  This can overwrite hand-written notes in those rows; review before posting.
+  Charged Attack ICD rows matching the current table's weapon-default rules are
+  omitted (including no-ICD catalyst/bow charged attacks); exceptions and
+  Lunar/Stellar reaction entries remain.
+  Each file is a whole page revision, so review the new rows (names, missing hitlag
+  scale defaulting to 0.01) and post it before the page changes again. Use
+  `--nodatapages True` (or untick **Update Combat Data Pages**) to skip it; it also
+  needs Advanced Properties and network access to the wiki.
 - Talent infoboxes get `scale_att1`/`scale_att2` from the Attribute Scaling rows'
   stats (`(%Max HP)` titles, `4.4% Max HP + 424` values; plain `(%)` is ATK), most
   used first; this matches about 89% of existing wiki pages exactly. Only Fontaine
@@ -335,7 +369,9 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   are sorted alphabetically, and lines with `attackTag`, `hitImpulseType`,
   `elementDurability`, `enBreak`, `attenuationTag` or `attenuationGroup` are
   highlighted. **Ctrl+F** searches the open file instead of the page.
-
+- Text output files have the same search: the magnifier button above the
+  preview (or **Ctrl+F** when the Game Data panel is closed) highlights matches,
+  with Enter/Shift+Enter or the arrows to step through them.
 ### Bot page (posting to the wiki)
 - In a job's output window, tick `.wikitext`/`.lua` files and click **Add**, or
   click **All**, to add them to the bot queue. The target page comes from the

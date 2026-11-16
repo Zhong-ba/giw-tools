@@ -137,6 +137,10 @@ parser.add_argument('--levels', type=int, nargs=3, default=[11, 13, 13], metavar
                     help='Max talent levels for the Attribute Scaling tables.')
 parser.add_argument('--noscaling', type=bool)
 parser.add_argument('--noap', type=bool, help='Leave the Advanced Properties sections empty (talents, passives, constellations).')
+parser.add_argument('--nodatapages', type=bool, help="Don't add the character to the current combat data pages (Elemental Gauge, "
+                    'ICD, Area of Effect, Hitlag, Targeting).')
+parser.add_argument('--updateexisting', action='store_true',
+                    help="Replace the character's existing combat data rows. Review the generated pages before posting.")
 parser.add_argument('--nodetect', type=bool, help="Don't detect the special passive type when no --natlan/--nodkrai/--hexerei/--stellar is given.")
 
 args = parser.parse_args()
@@ -778,4 +782,16 @@ if char_id != "None":
         id = cons[0](skilldepot)
         
         write_file(file_write_path, parse_cons(id, ver, ability_dict, cons_advanced.get(id, '')), overwrite = True)
+
+    if ran_ap and not args.nodatapages:
+        try:
+            from combatPages import combat_pages
+            data_pages, data_log = combat_pages(args.id, args.skilldepot, character, update_existing=args.updateexisting)
+            print('\n'.join(data_log))
+            os.makedirs(f'{CONFIG.OUTPUT_PATH}/{character}/Data Pages', exist_ok = True)
+            for title, text in data_pages.items():
+                write_file(f'{CONFIG.OUTPUT_PATH}/{character}/Data Pages/{title.replace("/", " ")}.wikitext',
+                           f'{pageinfo(title)}\n{text}', overwrite = True)
+        except (OSError, ValueError) as error:
+            print(f'Combat data pages skipped: {error}')
     
