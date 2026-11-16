@@ -45,6 +45,16 @@ function Status({ status }: { status: Job['status'] }) {
   </span>
 }
 
+function ToolText({ text, className }: { text: string; className: string }) {
+  const fimsh = text.replace(/fish/gi, match =>
+    match.slice(0, 2) + (match === match.toUpperCase() ? 'M' : 'm') + match.slice(2))
+  if (fimsh === text) return <span className={className}>{text}</span>
+  return <span className={`${className} tool-text-swap`}>
+    <span className="tool-text-original">{text}</span>
+    <span className="tool-text-fimsh" aria-hidden="true">{fimsh}</span>
+  </span>
+}
+
 function Dialog({ title, subtitle, extra, children, onClose, wide = false, expandable = true }: {
   title: string; subtitle?: string; extra?: ReactNode; children: ReactNode; onClose: () => void; wide?: boolean; expandable?: boolean
 }) {
@@ -1302,8 +1312,8 @@ function App() {
               return <button className={`tool-card ${tool.id}`} key={tool.id} onClick={() => disabled ? setPage('dataset') : openTool(tool)}
                 title={disabled ? 'Prepare the dataset to use this tool' : `Open ${tool.name}`}>
                 <span className="tool-card-top"><span className="tool-icon"><Icon className="tool-glyph" size={25} strokeWidth={1.6} /><img className="tool-melo" src="/painmelo.png" alt="" /></span><span className="category-label">{tool.category}</span></span>
-                <span className="tool-name">{tool.name}</span>
-                <span className="tool-description">{tool.description}</span>
+                <ToolText className="tool-name" text={tool.name} />
+                <ToolText className="tool-description" text={tool.description} />
                 {disabled && <span className="setup-required">Requires dataset setup <ChevronRight size={12} /></span>}
               </button>
             })}</div>

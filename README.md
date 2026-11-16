@@ -147,6 +147,10 @@ The first web version includes **Other Languages**, **Character Kit**,
 jobs, live logs, text/image previews, individual downloads, and ZIP exports.
 Existing command-line tools remain available.
 
+While a tool card's icon is replaced by Painmelo (on hover, keyboard focus, or
+during the logo's party sequence), `fish` in its displayed name and description
+temporarily becomes `fimsh`. Only changed text crossfades; tool inputs and outputs are unaffected.
+
 ### Install and start
 Complete the configuration and Node.js mapper dependency steps in Setup above.
 Then, from this directory, install the optional web dependencies and build the frontend:

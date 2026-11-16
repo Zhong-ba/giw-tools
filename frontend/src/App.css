@@ -59,10 +59,13 @@ main { max-width: 1420px; margin: auto; padding: 0 36px 40px; }
 /* The spin pauses instead of resetting on leave, so the fading Painmelo doesn't snap back upright. */
 .tool-glyph, .tool-melo { transition: opacity .3s ease, scale .3s ease; }
 .tool-melo { position: absolute; width: 32px; height: 34px; object-fit: contain; opacity: 0; scale: .6; pointer-events: none; animation: spin 1.4s linear infinite paused; }
-.tool-card:hover .tool-glyph, .tool-card:focus-visible .tool-glyph { opacity: 0; scale: .6; }
-.tool-card:hover .tool-melo, .tool-card:focus-visible .tool-melo { opacity: 1; scale: 1; animation-play-state: running; }
-.tool-icon.partying .tool-glyph { opacity: 0; scale: .6; }
-.tool-icon.partying .tool-melo { opacity: 1; scale: 1; }
+.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-glyph { opacity: 0; scale: .6; }
+.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-melo { opacity: 1; scale: 1; animation-play-state: running; }
+.tool-text-swap { display: grid; }
+.tool-text-swap > span { grid-area: 1 / 1; transition: opacity .3s ease; }
+.tool-text-fimsh { opacity: 0; }
+.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-text-original { opacity: 0; }
+.tool-card:is(:hover, :focus-visible, :has(.tool-icon.partying)) .tool-text-fimsh { opacity: 1; }
 .party-layer { position: fixed; z-index: 15; pointer-events: none; }
 body.party-time .main-shell { overflow: clip; }
 .character-kit .tool-icon { background: #1b2c3d; color: #84b8e2; }
