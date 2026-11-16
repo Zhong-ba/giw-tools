@@ -177,7 +177,8 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
 - Other Languages opens a dedicated generator instead of creating a job. Look up
   an exact name (case insensitive) in the chosen language, or enter a TextMapHash.
   Each distinct set of localized names gets a collapsible result card with Copy,
-  translation (`_tl`), romanization (`_rm`), and optional section-header controls.
+  translation (`_tl`), romanization (`_rm`), and optional section-header checkboxes.
+  Double-click empty space in a tool window to maximize it or restore its size.
   Repeated hashes with identical localized names are shown once. Results use the
   original formatter, shared with the desktop tool. A persistent SQLite index under
   `.data/ol` beside the profile makes new name/hash lookups fast without keeping

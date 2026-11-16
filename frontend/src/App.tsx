@@ -73,14 +73,30 @@ function Dialog({ title, subtitle, extra, children, onClose, wide = false, expan
   }
   return <dialog ref={ref} className={['dialog', wide && 'wide', full && 'fullscreen'].filter(Boolean).join(' ')}
     onCancel={event => { event.preventDefault(); onClose() }}
-    onClick={event => { if (event.target === event.currentTarget) onClose() }} aria-label={title}>
+    onClick={event => {
+      if (event.target !== event.currentTarget) return
+      const bounds = event.currentTarget.getBoundingClientRect()
+      if (event.clientX < bounds.left || event.clientX >= bounds.right || event.clientY < bounds.top || event.clientY >= bounds.bottom) onClose()
+    }}
+    onDoubleClick={event => {
+      if (!expandable || !(event.target instanceof Element) ||
+          event.target.closest('button, a, input, select, textarea, label, summary, [role="button"], [contenteditable]')) return
+      const selection = window.getSelection()
+      // Double-clicking padding can select a nearby word even though the pointer is outside it.
+      const selectingText = selection?.rangeCount && selection.toString().trim() &&
+        Array.from(selection.getRangeAt(0).getClientRects()).some(bounds =>
+          event.clientX >= bounds.left && event.clientX < bounds.right && event.clientY >= bounds.top && event.clientY < bounds.bottom)
+      if (event.target.closest('.dialog-header') || !selectingText) {
+        selection?.removeAllRanges()
+        toggleFull()
+      }
+    }} aria-label={title}>
     <header className="dialog-header"
-      onMouseDown={event => { if (expandable && event.detail > 1) event.preventDefault() }}
-      onDoubleClick={event => { if (expandable && !(event.target as Element).closest('button, a, input, select, textarea')) toggleFull() }}>
+      onMouseDown={event => { if (expandable && event.detail > 1) event.preventDefault() }}>
       <div className="dialog-title"><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>
       {extra && <div className="dialog-extra">{extra}</div>}
       <div className="dialog-actions">
-        {expandable && <button className="icon-button" onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (or double-click the header)' : 'Full screen (or double-click the header)'}>
+        {expandable && <button className="icon-button" onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (or double-click empty space)' : 'Full screen (or double-click empty space)'}>
           {full ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
         </button>}
         <button className="icon-button" onClick={onClose} aria-label="Close dialog" title="Close"><X size={20} /></button>
@@ -1324,7 +1340,7 @@ function App() {
       </main>
     </div>
     {selectedTool && (selectedTool.id === 'other-languages'
-      ? <Dialog title="Other Languages" wide onClose={() => setSelectedTool(null)}><OtherLanguages /></Dialog>
+      ? <Dialog title={selectedTool.name} subtitle={selectedTool.description} wide onClose={() => setSelectedTool(null)}><OtherLanguages /></Dialog>
       : <ToolForm key={selectedTool.id} tool={selectedTool} characters={characters} characterError={characterError} submitting={submitting} error={formError} onSubmit={parameters => { void run(parameters) }} onClose={() => setSelectedTool(null)} />)}
     {currentJob && <JobDialog key={currentJob.id} job={currentJob} onClose={() => setSelectedJob(null)} onDelete={() => deleteJob(currentJob)}
       onQueued={open => { void refresh(); if (open) { setSelectedJob(null); setPage('bot') } }} />}

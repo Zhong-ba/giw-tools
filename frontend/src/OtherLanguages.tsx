@@ -78,7 +78,6 @@ export function OtherLanguages() {
   }
   return <div className="dialog-body ol-screen">
     <form onSubmit={event => { void generate(event) }}>
-      <p>Generate an Other Languages template with official names from the selected dataset.</p>
       {busy && <p>The first lookup for a dataset builds its persistent index. Subsequent lookups reuse it.</p>}
       <div className="ol-query">
         <label className="field">
@@ -86,25 +85,19 @@ export function OtherLanguages() {
           <input autoFocus value={text} maxLength={20000} placeholder="Enter a name (case insensitive) or TextMapHash"
             onChange={event => setText(event.target.value)} />
         </label>
-        <label className="field"><span>Input Language</span><select value={language} onChange={event => setLanguage(event.target.value)}>
+      </div>
+      <div className="ol-options">
+        <div className="ol-checkboxes" role="group" aria-label="Output Options">
+          <label><input type="checkbox" checked={translation} onChange={event => setTranslation(event.target.checked)} />Include _tl</label>
+          <label><input type="checkbox" checked={romanization} onChange={event => setRomanization(event.target.checked)} />Include _rm</label>
+          <label><input type="checkbox" checked={header} onChange={event => setHeader(event.target.checked)} />Include Header</label>
+        </div>
+        <label className="field ol-language"><span>Input Language</span><select value={language} onChange={event => setLanguage(event.target.value)}>
           {languages.map(code => <option key={code} value={code}>{code}</option>)}
         </select></label>
         <button className="button primary" disabled={busy || !text.trim()} type="submit">
           {busy && <LoaderCircle size={16} className="spin" />}{busy ? 'Generating' : 'Generate'}
         </button>
-      </div>
-      <div className="ol-options">
-        <fieldset><legend>Translation (_tl)</legend>
-          <label><input type="radio" name="ol-tl" checked={translation} onChange={() => setTranslation(true)} />Include _tl Parameters</label>
-          <label><input type="radio" name="ol-tl" checked={!translation} onChange={() => setTranslation(false)} />Exclude _tl Parameters</label>
-        </fieldset>
-        <fieldset><legend>Romanization (_rm)</legend>
-          <label><input type="radio" name="ol-rm" checked={romanization} onChange={() => setRomanization(true)} />Include _rm Parameters</label>
-          <label><input type="radio" name="ol-rm" checked={!romanization} onChange={() => setRomanization(false)} />Exclude _rm Parameters</label>
-        </fieldset>
-        <fieldset><legend>Other Options</legend>
-          <label><input type="checkbox" checked={header} onChange={event => setHeader(event.target.checked)} />Include Header</label>
-        </fieldset>
       </div>
     </form>
     {error && <div className="error-box" role="alert"><CircleAlert size={18} />{error}</div>}
