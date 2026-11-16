@@ -150,7 +150,8 @@ Existing command-line tools remain available.
 While a tool card's icon is replaced by Painmelo (on hover, keyboard focus, or
 during the logo's party sequence), `fish` in its displayed name and description
 temporarily becomes `fimsh`. Only changed text crossfades; tool inputs and outputs are unaffected.
-Click the Painmelo brand to boost the spin-up with a short pulse instead of reloading the page.
+Click the Painmelo brand to boost the spin-up with a short pulse and confetti instead of reloading the page.
+Reduced-motion preferences disable the spin and confetti.
 
 ### Install and start
 Complete the configuration and Node.js mapper dependency steps in Setup above.
@@ -537,6 +538,10 @@ Frontend: import the repository in Vercel with **Root Directory** `frontend`
 (settings come from `frontend/vercel.json`) and set the environment variable
 `VITE_API_URL` to the backend URL, e.g. `https://api.example.com`. Without it the
 frontend calls `/api` on its own origin, as in local mode.
+Enable **Web Analytics** in the Vercel project before deploying. Keep **Enable access
+to System Environment Variables** enabled: the `VERCEL=1` build flag enables the
+Analytics component only on Vercel, not in local workshop/preview builds.
+The static HTML provides Discord previews with the Painmelo title and image, without a description.
 
 Local mode (`python -m webui`, the default) is unchanged: loopback only, with
 same-origin checks, server-side jobs and bot queue in the working directory, and

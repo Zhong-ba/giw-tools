@@ -565,6 +565,29 @@ export const startParty = (img: HTMLImageElement | null, allowParty: boolean) =>
 }
 export const stopParty = () => { hovered = false }
 
+const clickConfetti = (img: HTMLImageElement) => {
+  const bounds = img.getBoundingClientRect()
+  const burst = document.createElement('div')
+  burst.className = 'boost-confetti'
+  burst.setAttribute('aria-hidden', 'true')
+  burst.style.left = `${bounds.left + bounds.width / 2}px`
+  burst.style.top = `${bounds.top + bounds.height / 2}px`
+  document.body.append(burst)
+  for (let i = 0; i < 18; i++) {
+    const bit = document.createElement('span')
+    bit.style.backgroundColor = pick(COLORS)
+    burst.append(bit)
+    const angle = rand(-Math.PI, 0), distance = rand(45, 110), rotation = rand(-240, 240)
+    const x = Math.cos(angle) * distance, y = Math.sin(angle) * distance
+    bit.animate([
+      { transform: 'translate(0, 0) rotate(0deg)', opacity: 1 },
+      { transform: `translate(${x * 0.6}px, ${y}px) rotate(${rotation * 0.5}deg)`, opacity: 1, offset: 0.5 },
+      { transform: `translate(${x}px, ${y + 60}px) rotate(${rotation}deg)`, opacity: 0 },
+    ], { duration: rand(550, 800), easing: 'ease-out', fill: 'forwards' })
+  }
+  setTimeout(() => burst.remove(), 850)
+}
+
 /** Advances the current ramp without jumping the icons' rotation angles. */
 export const boostParty = (img: HTMLImageElement | null, allowParty: boolean) => {
   if (!img) return
@@ -574,6 +597,7 @@ export const boostParty = (img: HTMLImageElement | null, allowParty: boolean) =>
     { backgroundColor: 'transparent' },
   ], { duration: 350, easing: 'ease-out' })
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  clickConfetti(img)
   img.animate([
     { scale: '1' }, { scale: '1.22', offset: 0.3 }, { scale: '0.96', offset: 0.7 }, { scale: '1' },
   ], { duration: 300, easing: 'ease-out' })

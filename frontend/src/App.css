@@ -23,6 +23,8 @@
 .sidebar { width: 220px; flex-shrink: 0; background: #0a1019; border-right: 1px solid #1a2535; color: #a4adba; display: flex; flex-direction: column; padding: 28px 16px 24px; position: fixed; inset: 0 auto 0 0; z-index: 20; }
 .brand { display: flex; align-items: center; gap: 12px; color: #fff; padding: 0 6px; font-size: 17px; font-weight: 630; letter-spacing: -.4px; margin-bottom: 32px; border: 0; border-radius: 8px; background: transparent; text-align: left; }
 .brand-mark { width: 37px; height: 40px; object-fit: contain; filter: drop-shadow(0 3px 8px #0008); }
+.boost-confetti { position: fixed; pointer-events: none; z-index: 30; }
+.boost-confetti > span { position: absolute; width: 5px; height: 7px; border-radius: 1px; }
 .live-dot { height: 6px; width: 6px; background: #75c9a8; border-radius: 100%; display: inline-block; flex-shrink: 0; }
 .live-dot.warning { background: #d7aa5d; }
 .sidebar nav { display: flex; flex-direction: column; gap: 6px; }
@@ -72,7 +74,7 @@ body.party-time .main-shell { overflow: clip; }
 .attribute-scaling .tool-icon { background: #1c3328; color: #7fd1a2; }
 .tool-card.attribute-scaling { position: relative; isolation: isolate; overflow: hidden; }
 .tool-card.attribute-scaling > :not(.tool-watermark) { position: relative; z-index: 1; }
-.tool-watermark { position: absolute; right: 0; bottom: 0; width: 170px; height: auto; filter: grayscale(1); opacity: .12; pointer-events: none; z-index: 0; }
+.tool-watermark { position: absolute; right: 0; bottom: 0; width: 136px; height: auto; filter: grayscale(1); opacity: .12; pointer-events: none; z-index: 0; }
 .character-data .tool-icon { background: #3a3119; color: #e8c36f; }
 .redirects .tool-icon { background: #382a1c; color: #e3ad7a; }
 .enemy .tool-icon { background: #3a1d24; color: #ec8f9c; }
