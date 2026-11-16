@@ -6,7 +6,7 @@ import {
     FileText, Fish, FolderOpen, Image as ImageIcon, KeyRound, LayoutGrid, Link2, ListPlus, LoaderCircle, Maximize2, Minimize2, Pencil, Play,
     RotateCcw, Save, Scale, Search, Send, Square, Terminal, Trash2, X,
 } from 'lucide-react'
-  import { AbyssSpiral, BearFace, CrescentBird, HornedMask, StygianLotus, TheaterBook } from './icons'
+  import { AbyssSpiral, BearFace, CrescentBird, HornedMask, StygianBloom, TheaterBook } from './icons'
 import type { Artifact, BotSettings, BotState, Character, Dataset, Job, Parameters, Period, PickerItem, PreparedDatasets, Property, QueueEntry, QueueItem, Revision, ServerConfig, Tool, Versions } from './api'
 import { api, datasetChoice, downloadArchive, hosted, message, serverConfig, setDatasetChoice, useAssetUrl } from './api'
 import type { StorageInfo } from './local'
@@ -21,7 +21,7 @@ import { SearchBar } from './SearchBar'
 import { OtherLanguages } from './OtherLanguages'
 
 const icons: Record<string, typeof BookOpen> = { 'other-languages': CrescentBird, 'character-kit': BearFace, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, redirects: Link2, enemy: HornedMask,
-  bounties: Crosshair, 'fishing-points': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianLotus }
+  bounties: Crosshair, 'fishing-points': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianBloom }
 const picksCharacter = (tool: Tool | null) => !!tool && 'character_id' in tool.schema.properties
 const advanced = new Set(['natlan', 'nodkrai', 'hexerei', 'stellar', 'traveler', 'skill_depot'])
 const passiveTypes = ['natlan', 'nodkrai', 'hexerei', 'stellar']

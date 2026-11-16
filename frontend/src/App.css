@@ -78,6 +78,7 @@ body.party-time .main-shell { overflow: clip; }
 .character-data .tool-icon { background: #3a3119; color: #e8c36f; }
 .redirects .tool-icon { background: #382a1c; color: #e3ad7a; }
 .enemy .tool-icon { background: #3a1d24; color: #ec8f9c; }
+.stygian-onslaught .tool-icon { background: #30203f; color: #c69af4; }
 .bounties .tool-icon { background: #2e3119; color: #c9d66f; }
 .fishing-points .tool-icon { background: #17303a; color: #79cbe0; }
 .fish-weights .tool-icon { background: #173a30; color: #7fe0b8; }

@@ -36,12 +36,15 @@ export const AbyssSpiral = createLucideIcon('AbyssSpiral', [
   ['path', { d: 'M12 17.2A5.85 5.85 0 0 1 5.5 12A7.15 7.15 0 0 1 12 4.2A8.45 8.45 0 0 1 21.1 12A9.75 9.75 0 0 1 12 22.4', key: 'arm-2' }],
 ])
 
-// Stygian Onslaught: a cupped, spiky lotus bloom over flared petals.
-export const StygianLotus = createLucideIcon('StygianLotus', [
-  ['path', { d: 'M7.6 13.2C6.7 10 7 6.6 8.4 3.8L10.3 6.4L12 3.2L13.7 6.4L15.6 3.8C17 6.6 17.3 10 16.4 13.2C14.4 15 9.6 15 7.6 13.2Z', key: 'bloom' }],
-  ['path', { d: 'M10.3 6.4C10 9.2 10.6 11.8 12 14.2C13.4 11.8 14 9.2 13.7 6.4', key: 'seam' }],
-  ['path', { d: 'M12 18.6C7.4 19.4 3.6 17.6 2 14.2C4 13.4 6.2 13.4 8.2 14.4', key: 'petal-left' }],
-  ['path', { d: 'M12 18.6C16.6 19.4 20.4 17.6 22 14.2C20 13.4 17.8 13.4 15.8 14.4', key: 'petal-right' }],
+// Stygian Onslaught: hooked petals and curling tendrils around an abyssal core.
+export const StygianBloom = createLucideIcon('StygianBloom', [
+  ['path', { d: 'M8.2 16.7C4.8 13.8 4.5 8.4 7.2 4.5L8.3 7.7C8.2 4.9 9.9 2.8 12 1.5C10.7 4.1 10.9 5.5 11.8 6.6', key: 'petal-left' }],
+  ['path', { d: 'M15.4 6.1C19.6 7.2 20.5 11.5 18.4 15.6L20.1 15C18.8 18.1 15.1 19.3 11.1 18.1C8.9 17.5 7.4 16.4 6.5 14.8C9.1 15.9 11.5 15.8 13.1 14.9', key: 'petal-right' }],
+  ['circle', { cx: '12.5', cy: '11.6', r: '2.1', key: 'core' }],
+  ['path', { d: 'M7.2 17.1C5.3 15.6 3.6 15.1 1.5 16.7C3.8 16.7 5.1 18.9 7.7 19.3', key: 'thorn' }],
+  ['path', { d: 'M15.4 18.3C14.8 20.2 12.1 21.8 9.7 22.3L10.4 19.1', key: 'petal-bottom' }],
+  ['path', { d: 'M4.8 12.2C2.2 10.7 2.9 7.4 4.5 6.4', key: 'tendril-left' }],
+  ['path', { d: 'M19.3 8.3C22.6 5.4 21.5 2.5 18.5 2.6', key: 'tendril-right' }],
 ])
 
 // Imaginarium Theater: an open script before a diamond frame.
