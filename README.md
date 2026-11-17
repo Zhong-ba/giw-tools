@@ -141,22 +141,6 @@ The tests use temporary configuration, game data, and output directories; they d
 modify your configured game data or generated output. Enemy-tool tests also require
 the tool's existing `Levenshtein` dependency to be installed.
 
-## Web interface
-The first web version includes **Other Languages**, **Character Kit**,
-**Attribute Scaling**, **Character Data**, **Enemy**, **Spiral Abyss**, **Imaginarium Theater**, **Stygian Onslaught**, **Fishing Point**, **Fish Weights**, **Manual Cooking Data**, **Bounties** and **Redirect Builder**, plus dataset setup/update controls, persistent background
-jobs, live logs, text/image previews, individual downloads, and ZIP exports.
-Existing command-line tools remain available.
-
-While a tool card's icon is replaced by Painmelo (on hover, keyboard focus, or
-during the logo's party sequence), `fish` in its displayed name and description
-temporarily becomes `fimsh`. These icon swaps, hover spins and the logo's party sequence
-require a hover-capable mouse/trackpad pointer; mobile keeps the normal icons and text.
-On mobile, tapping the brand boosts only the main logo's spin, which winds down
-between taps without starting the tool spins or party.
-Only changed text crossfades; tool inputs and outputs are unaffected.
-Click the Painmelo brand to boost the spin-up with a short pulse and confetti at the click position instead of reloading the page.
-Reduced-motion preferences disable the spin and confetti.
-
 ### Install and start
 Complete the configuration and Node.js mapper dependency steps in Setup above.
 Then, from this directory, install the optional web dependencies and build the frontend:

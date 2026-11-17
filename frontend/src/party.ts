@@ -476,15 +476,17 @@ class Party {
   }
 }
 
-// The favicon mirrors the logo's rotation; redraws are throttled since each one re-encodes a PNG.
+// The favicon follows the logo's speed at a lower rate to avoid strobing between PNG updates.
+const FAVICON_MAX_SPEED = 540
 const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
 const faviconHref = favicon?.getAttribute('href') ?? ''
 const faviconCanvas = document.createElement('canvas')
 faviconCanvas.width = faviconCanvas.height = 64
 let faviconDrawn = 0
+let faviconAngle = 0
 const drawFavicon = (angle: number | null, now: number) => {
   if (!favicon) return
-  if (angle === null) { favicon.href = faviconHref; return }
+  if (angle === null) { faviconAngle = 0; favicon.href = faviconHref; return }
   const context = faviconCanvas.getContext('2d')
   if (now - faviconDrawn < 40 || !context || !meloImage.complete || !meloImage.naturalWidth) return
   faviconDrawn = now
@@ -564,7 +566,10 @@ const frame = (now: number) => {
   }
   if (party?.step(dt, hovered)) party = null
   if (logo.step(dt)) { logo = null; drawFavicon(null, now); return }
-  if (desktopPointer.matches) drawFavicon(logo.angle, now)
+  if (desktopPointer.matches) {
+    faviconAngle = (faviconAngle + logo.speed / MAX_SPEED * FAVICON_MAX_SPEED * dt) % 360
+    drawFavicon(faviconAngle, now)
+  }
   for (const tool of [...tools]) if (tool.step(dt)) {
     tools.splice(tools.indexOf(tool), 1)
     deactivate(tool.img)
