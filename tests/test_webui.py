@@ -143,7 +143,7 @@ class WebTests(unittest.TestCase):
     def test_schema_validation_and_browser_request_boundaries(self):
         tools = self.client.get('/api/tools').json()
         self.assertEqual({tool['id'] for tool in tools}, {'redirects', 'character-kit', 'other-languages',
-                                                         'binoutput-viewer', 'attribute-scaling', 'character-data', 'enemy', 'bounties', 'fishing-points', 'fish-weights',
+                                                         'binoutput-viewer', 'attribute-scaling', 'character-data', 'enemy', 'bounties', 'fishing-point', 'fish-weights',
                                                          'manual-cooking', 'spiral-abyss', 'stygian-onslaught', 'imaginarium-theater'})
         self.assertEqual([tool['id'] for tool in tools[-3:]], ['other-languages', 'binoutput-viewer', 'redirects'])
         self.assertEqual(next(tool['category'] for tool in tools if tool['id'] == 'other-languages'), 'Utilities')

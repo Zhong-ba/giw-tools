@@ -6,7 +6,7 @@ import {
     FileText, Fish, FolderOpen, Image as ImageIcon, KeyRound, LayoutGrid, Link2, ListPlus, LoaderCircle, Maximize2, Minimize2, Pencil, Play,
     RotateCcw, Save, Scale, Search, Send, Square, Terminal, Trash2, X,
 } from 'lucide-react'
-  import { AbyssSpiral, BearFace, CrescentBird, HornedMask, StygianBloom, TheaterBook } from './icons'
+  import { AbyssSpiral, Guoba, CloudRetainer, Hilichurl, StygianBloom, TheaterBook } from './icons'
 import type { Artifact, BotSettings, BotState, Character, Dataset, Job, Parameters, Period, PickerItem, PreparedDatasets, Property, QueueEntry, QueueItem, Revision, ServerConfig, Tool, Versions } from './api'
 import { api, datasetChoice, downloadArchive, hosted, message, saveBlob, serverConfig, setDatasetChoice, useAssetUrl } from './api'
 import type { StorageInfo } from './local'
@@ -18,8 +18,8 @@ import { SearchBar } from './SearchBar'
 import { OtherLanguages } from './OtherLanguages'
 import { BinOutputViewer } from './BinOutputViewer'
 
-const icons: Record<string, typeof BookOpen> = { 'other-languages': CrescentBird, 'binoutput-viewer': Braces, 'character-kit': BearFace, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, 'particle-audit': ChartColumn, redirects: Link2, enemy: HornedMask,
-  bounties: Crosshair, 'fishing-points': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianBloom }
+const icons: Record<string, typeof BookOpen> = { 'other-languages': CloudRetainer, 'binoutput-viewer': Braces, 'character-kit': Guoba, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, 'particle-audit': ChartColumn, redirects: Link2, enemy: Hilichurl,
+  bounties: Crosshair, 'fishing-point': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianBloom }
 const picksCharacter = (tool: Tool | null) => !!tool && 'character_id' in tool.schema.properties
 const advanced = new Set(['natlan', 'nodkrai', 'hexerei', 'stellar', 'traveler', 'skill_depot'])
 const passiveTypes = ['natlan', 'nodkrai', 'hexerei', 'stellar']
@@ -136,7 +136,7 @@ interface PickerConfig {
 const pickers: Record<string, PickerConfig> = {
   enemy_ids: { list: '/enemies', table: 'MonsterExcelConfigData', plural: 'enemies', label: 'Enemies',
     search: 'Search by name, ID or internal name...', compare: true, newNames: true },
-  pool_ids: { list: '/fishing-points', table: 'FishPoolExcelConfigData', plural: 'fishing points', label: 'Fishing Points',
+  pool_ids: { list: '/fishing-point', table: 'FishPoolExcelConfigData', plural: 'fishing points', label: 'Fishing Points',
     search: 'Search by name, ID or region...', compare: true },
   bounty_ids: { list: '/bounties', table: 'HuntingV2MonsterBundleExcelConfigData', plural: 'bounties', label: 'Bounties',
     search: 'Search by enemy, ID or region...', compare: false, selectAll: true },

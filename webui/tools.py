@@ -398,7 +398,7 @@ TOOLS = {
         Tool('stygian-onslaught', 'Stygian Onslaught', 'Enemies',
              'Generate a Stygian Onslaught event page with each difficulty\'s lineup, mechanics, descriptions and rewards.',
              StygianInputs, stygian_onslaught),
-        Tool('fishing-points', 'Fishing Point', 'World',
+        Tool('fishing-point', 'Fishing Point', 'World',
              'Generate Fishing Point pages with their fish, area and limits, for any points or those added between two versions.',
              FishingInputs, fishing_points),
         Tool('fish-weights', 'Fish Weights', 'World',

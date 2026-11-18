@@ -626,7 +626,7 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
         except (OSError, ValueError, KeyError) as error:
             raise HTTPException(409, str(error)) from error
 
-    @application.get('/api/fishing-points')
+    @application.get('/api/fishing-point')
     def fishing_point_list(older: str | None = Query(None, pattern=BUILD), newer: str = Query('current', pattern=BUILD),
                            config: dict = Depends(prepared)):
         from utils.fishing import city_names, fishing_points
