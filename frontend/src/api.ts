@@ -8,6 +8,7 @@ export interface Property {
   default?: Parameters[string]
   enum?: string[]
   anyOf?: { type: string }[]
+  items?: { type?: string }
   minimum?: number
   maximum?: number
   maxLength?: number

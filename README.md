@@ -564,6 +564,10 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
 For frontend development, run the API with `python -m webui` and, in another
 terminal, `npm.cmd --prefix frontend run dev`. Open the Vite URL it prints; API
 requests are proxied to port 8000. Rebuild for the Python-served production UI.
+Tool links use the tool ID as the path, and shareable non-default form values are
+stored in the query string (for example, `/character-kit?character_id=10000002`).
+Repeated query keys represent multiple selections. Large free-text inputs are
+omitted; opening a link fills the form but does not run it.
 
 Add a Pydantic input model and a runner to `webui/tools.py`, then register a
 `Tool` in `TOOLS`. The API publishes its schema and the UI builds a form from

@@ -35,6 +35,91 @@ const isLua = (path: string) => path.toLowerCase().endsWith('.lua')
 const FULLSCREEN_KEY = 'wiki-tools.fullscreen'
 const preferFullscreen = () => { try { return localStorage.getItem(FULLSCREEN_KEY) === '1' } catch { return false } }
 const rememberFullscreen = (value: boolean) => { try { localStorage.setItem(FULLSCREEN_KEY, value ? '1' : '0') } catch { /* storage unavailable */ } }
+const urlExcludedFields = new Set(['lines', 'text'])
+const propertyType = (property: Property) => property.type ?? property.anyOf?.find(item => item.type !== 'null')?.type
+const propertyDefault = (property: Property): Parameters[string] =>
+  property.default ?? (propertyType(property) === 'array' ? [] : '')
+
+function readToolUrl(tool: Tool, search: string) {
+  const values = Object.fromEntries(Object.entries(tool.schema.properties)
+    .map(([key, property]) => [key, propertyDefault(property)])) as Parameters
+  const invalid: string[] = []
+  const provided: string[] = []
+  const params = new URLSearchParams(search)
+  for (const [key, property] of Object.entries(tool.schema.properties)) {
+    if (urlExcludedFields.has(key)) {
+      if (params.has(key)) invalid.push(key)
+      continue
+    }
+    if (params.has(key)) provided.push(key)
+    const raw = params.getAll(key)
+    if (!raw.length) continue
+    const type = propertyType(property)
+    let value: Parameters[string]
+    if (type === 'array') {
+      if (raw.length === 1 && raw[0] === '') value = []
+      else if (property.items?.type === 'integer' || property.items?.type === 'number') {
+        const numbers = raw.map(item => Number(item))
+        if (raw.some(item => item.trim() === '') || numbers.some(item => !Number.isFinite(item) ||
+            (property.items?.type === 'integer' && !Number.isInteger(item)))) {
+          invalid.push(key)
+          continue
+        }
+        value = numbers
+      } else value = raw
+    } else {
+      if (raw.length !== 1) {
+        invalid.push(key)
+        continue
+      }
+      const item = raw[0]
+      if (item === '') value = ''
+      else if (type === 'boolean' && (item === 'true' || item === 'false')) value = item === 'true'
+      else if (type === 'boolean') {
+        invalid.push(key)
+        continue
+      } else if (type === 'integer' || type === 'number') {
+        const number = Number(item)
+        if (!Number.isFinite(number) || (type === 'integer' && !Number.isInteger(number))) {
+          invalid.push(key)
+          continue
+        }
+        value = number
+      } else value = item
+    }
+    if ((typeof value === 'string' && (value.length > (property.maxLength ?? Infinity) ||
+        (property.enum && !property.enum.includes(value)))) ||
+        (typeof value === 'number' && ((property.minimum !== undefined && value < property.minimum) ||
+          (property.maximum !== undefined && value > property.maximum)))) {
+      invalid.push(key)
+      continue
+    }
+    values[key] = value
+  }
+  return { values, invalid, provided }
+}
+
+function writeToolUrl(tool: Tool, values: Parameters, touched: Set<string>) {
+  const url = new URL(window.location.href)
+  for (const [key, property] of Object.entries(tool.schema.properties)) {
+    url.searchParams.delete(key)
+    if (urlExcludedFields.has(key)) continue
+    const value = values[key]
+    if (JSON.stringify(value) === JSON.stringify(propertyDefault(property))) {
+      if (Array.isArray(value) && !value.length && touched.has(key)) url.searchParams.append(key, '')
+      continue
+    }
+    if (Array.isArray(value)) {
+      if (!value.length) url.searchParams.append(key, '')
+      else value.forEach(item => url.searchParams.append(key, String(item)))
+    } else if (value === '' || value === null) url.searchParams.set(key, '')
+    else url.searchParams.set(key, String(value))
+  }
+  const next = `${url.pathname}${url.search}${url.hash}`
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) {
+    window.history.replaceState(window.history.state, '', next)
+  }
+}
 
 function Status({ status }: { status: Job['status'] }) {
   return <span className={`status ${status}`}>
@@ -144,16 +229,23 @@ const pickers: Record<string, PickerConfig> = {
 const pickerKey = (tool: Tool) => Object.keys(pickers).find(key => key in tool.schema.properties)
 
 /** A checklist of the dataset's dated periods (newest first, which starts selected), like the enemy picker. */
-function PeriodPicker({ label, kind, value, onChange }: { label: string; kind: string; value: string[]; onChange: (value: string[]) => void }) {
+function PeriodPicker({ label, kind, value, preserveSelection, onChange }: {
+  label: string; kind: string; value: string[]; preserveSelection: boolean; onChange: (value: string[]) => void
+}) {
   const [periods, setPeriods] = useState<Period[] | null>(null)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const initialSelection = useRef(preserveSelection || value.length > 0)
   const onChangeRef = useRef(onChange)
   useEffect(() => { onChangeRef.current = onChange })
   useEffect(() => {
     const controller = new AbortController()
     api<Period[]>(`/periods/${kind}`, { signal: controller.signal })
-      .then(result => { setPeriods(result); onChangeRef.current(result.length ? [result[0].value] : []) })
+      .then(result => {
+        setPeriods(result)
+        if (initialSelection.current) initialSelection.current = false
+        else onChangeRef.current(result.length ? [result[0].value] : [])
+      })
       .catch(reason => { if (!controller.signal.aborted) { setError(message(reason)); setPeriods([]) } })
     return () => controller.abort()
   }, [kind])
@@ -184,17 +276,19 @@ function PeriodPicker({ label, kind, value, onChange }: { label: string; kind: s
   </div>
 }
 
-function ItemPicker({ config, value, onChange, onVersion }: {
-  config: PickerConfig; value: number[]; onChange: (value: number[]) => void; onVersion: (version: string) => void
+function ItemPicker({ config, value, preserveSelection, onChange, onVersion }: {
+  config: PickerConfig; value: number[]; preserveSelection: boolean
+  onChange: (value: number[]) => void; onVersion: (version: string) => void
 }) {
   const [versions, setVersions] = useState<Versions | null>(null)
-  const [compare, setCompare] = useState(config.compare)
+  const [compare, setCompare] = useState(config.compare && !preserveSelection && value.length === 0)
   const [older, setOlder] = useState('')
   const [newer, setNewer] = useState('current')
   const [newNamesOnly, setNewNamesOnly] = useState(true)
   const [items, setItems] = useState<PickerItem[] | null>(null)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const initialSelection = useRef(preserveSelection || value.length > 0)
   useEffect(() => {
     const controller = new AbortController()
     api<Versions>(`/versions?${new URLSearchParams({ table: config.table })}`, { signal: controller.signal })
@@ -217,7 +311,8 @@ function ItemPicker({ config, value, onChange, onVersion }: {
       .then(result => {
         setItems(result)
         // A version comparison selects everything it finds; the full list starts empty unless the tool prefers all.
-        onChangeRef.current(comparing || config.selectAll ? result.map(item => item.id) : [])
+        if (initialSelection.current) initialSelection.current = false
+        else onChangeRef.current(comparing || config.selectAll ? result.map(item => item.id) : [])
       })
       .catch(reason => { if (!controller.signal.aborted) { setError(message(reason)); setItems([]) } })
     return () => { clearTimeout(start); controller.abort() }
@@ -277,14 +372,17 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
   tool: Tool; characters: Character[]; characterError: string; submitting: boolean; error: string
   onSubmit: (parameters: Parameters) => void; onClose: () => void
 }) {
-  const [values, setValues] = useState<Parameters>(() => Object.fromEntries(
-    Object.entries(tool.schema.properties).map(([key, property]) => [key, property.default ?? '']),
-  ))
+  const [urlState] = useState(() => readToolUrl(tool, window.location.search))
+  const [values, setValues] = useState<Parameters>(() => urlState.values)
+  const [touched, setTouched] = useState<Set<string>>(() => new Set())
+  const urlWarning = urlState.invalid.length
+    ? `Ignored invalid or non-shareable URL value(s) for: ${urlState.invalid.join(', ')}.` : ''
   const [characterSearch, setCharacterSearch] = useState('')
   const [versionNote, setVersionNote] = useState('')
   const autoVersion = useRef('')
   const characterId = values.character_id
   const fillsVersion = 'version' in tool.schema.properties && 'character_id' in tool.schema.properties
+  useEffect(() => { writeToolUrl(tool, values, touched) }, [tool, values, touched])
   useEffect(() => {
     if (!fillsVersion || typeof characterId !== 'number') return
     const controller = new AbortController()
@@ -319,7 +417,10 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
       .catch(() => { if (!controller.signal.aborted) setPassiveNote('') })
     return () => controller.abort()
   }, [detectsPassives, characterId, tool])
-  const update = (key: string, value: Parameters[string]) => setValues(previous => ({ ...previous, [key]: value }))
+  const update = (key: string, value: Parameters[string]) => {
+    setTouched(previous => new Set(previous).add(key))
+    setValues(previous => ({ ...previous, [key]: value }))
+  }
   // Fills the version unless the user typed their own.
   const autofillVersion = useCallback((version: string) => setValues(previous => {
     if (previous.version !== '' && previous.version !== autoVersion.current) return previous
@@ -353,7 +454,7 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
     return () => { clearTimeout(start); controller.abort() }
   }, [periodDates, autofillVersion])
   const field = (key: string, property: Property) => {
-    const type = property.type ?? property.anyOf?.find(item => item.type !== 'null')?.type
+    const type = propertyType(property)
     const required = tool.schema.required?.includes(key)
     if (type === 'boolean') return <label className="check-field" key={key}>
       <input type="checkbox" checked={values[key] === true} onChange={event => update(key, event.target.checked)} />
@@ -370,10 +471,12 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
             .map(item => <option key={item.id} value={item.id}>{item.name} ({item.id})</option>)}
         </select>
         {characterError && <small className="field-error" role="alert">{characterError}</small>}
-      </> : pickers[key] ? <ItemPicker config={pickers[key]} value={Array.isArray(values[key]) ? values[key].map(Number) : []}
+      </>       : pickers[key] ? <ItemPicker config={pickers[key]} value={Array.isArray(values[key]) ? values[key].map(Number) : []}
+        preserveSelection={urlState.provided.includes(key) || touched.has(key)}
         onChange={value => update(key, value)} onVersion={autofillVersion} />
       : property.periods ? <PeriodPicker label={property.title} kind={property.periods}
-        value={Array.isArray(values[key]) ? values[key].map(String) : []} onChange={value => update(key, value)} />
+        value={Array.isArray(values[key]) ? values[key].map(String) : []}
+        preserveSelection={urlState.provided.includes(key) || touched.has(key)} onChange={value => update(key, value)} />
       : property.enum ? <select id={key} required={required} value={String(values[key] ?? '')}
         onChange={event => update(key, event.target.value)}>
         {property.enum.map(option => <option key={option} value={option}>{option}</option>)}
@@ -401,7 +504,7 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
   // A tool without settings gets a compact prompt: no empty body and nothing to maximize.
   return <Dialog title={tool.name} subtitle={tool.description} onClose={onClose} expandable={fields.length > 0}>
     <form onSubmit={submit}>
-      {(fields.length > 0 || error) && <div className="dialog-body form-fields">
+      {(fields.length > 0 || error || urlWarning) && <div className="dialog-body form-fields">
         {render(fields.filter(([key]) => !advanced.has(key)))}
         {fields.some(([key]) => advanced.has(key)) && <details className="advanced" open={advancedOpen}
           onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
@@ -409,6 +512,7 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
           {passiveNote && <small className="version-note">{passiveNote}</small>}
           <div className="form-fields">{render(fields.filter(([key]) => advanced.has(key)))}</div>
         </details>}
+        {urlWarning && <div className="error-box" role="alert"><CircleAlert size={18} />{urlWarning}</div>}
         {error && <div className="error-box" role="alert"><CircleAlert size={18} />{error}</div>}
       </div>}
       <footer className="dialog-footer"><button type="button" className="button secondary" onClick={onClose}>Cancel</button>
