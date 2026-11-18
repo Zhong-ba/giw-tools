@@ -197,8 +197,8 @@ function Directory({ path, name, selected, expanded, load, onSelect }: {
   </div>
 }
 
-function Browser({ source, highlights, cleanDecimals, link, listings }: {
-  source: Source; highlights: string[]; cleanDecimals: boolean
+function Browser({ source, highlights, cleanDecimals, filename, link, listings }: {
+  source: Source; highlights: string[]; cleanDecimals: boolean; filename: string
   link?: ReturnType<typeof readViewerLink>; listings: Map<string, TreeEntry[]>
 }) {
   const [references, setReferences] = useState<References | null>(null)
@@ -207,7 +207,6 @@ function Browser({ source, highlights, cleanDecimals, link, listings }: {
   const [filter, setFilter] = useState<Filter>(link?.filter ?? 'all')
   const [loading, setLoading] = useState(source.kind !== 'all' || !!link?.path)
   const [error, setError] = useState('')
-  const [filename, setFilename] = useState(link?.name ?? '')
   const [foundNames, setFoundNames] = useState<{ term: string; entries: { key: string; name: string }[]; truncated: boolean; error?: string }>()
   const [copiedMode, setCopiedMode] = useState<boolean | null>(null)
   const [focus, setFocus] = useState<{ line: number } | null>(null)
@@ -377,9 +376,6 @@ function Browser({ source, highlights, cleanDecimals, link, listings }: {
   return <div className="binoutput-layout">
     <aside className="binoutput-tree" aria-label="BinOutput File Tree">
       <div className="binoutput-tree-title">{related ? `${references?.character ?? 'Relevant Files'}${references ? ` (${references.files.length})` : ''}` : 'BinOutput'}</div>
-      <label className="field"><span>Filter by Filename</span>
-        <input type="search" value={filename} maxLength={120} onChange={event => setFilename(event.target.value)} />
-      </label>
       {term ? nameResults?.error ? <div className="error-box" role="alert">{nameResults.error}</div>
         : !nameResults ? <span className="muted" role="status">{related && error ? 'Could not load filenames.' : 'Searching filenames...'}</span>
         : <>
@@ -426,6 +422,7 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
 }) {
   const [initial] = useState(() => readViewerLink(jobId))
   const [link, setLink] = useState(initial)
+  const [filename, setFilename] = useState(initial.name)
   const [listings] = useState(() => new Map<string, TreeEntry[]>())
   const [mode, setMode] = useState<'all' | 'character' | 'enemy' | 'gadget' | 'job'>(jobId ? 'job' : initial.scope?.kind ?? 'all')
   const linkedId = (kind: typeof publicScopes[number]) => initial.scope?.kind === kind ? String(initial.scope.id) : ''
@@ -451,6 +448,7 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
   }, [jobId, mode, scopeValue, cleanDecimals, highlightParam])
   const resetFileLink = () => {
     setLink({ ...initial, path: '', name: '', filter: 'all' })
+    setFilename('')
     if (!jobId) updateToolQuery(toolId, { path: undefined, name: undefined, filter: undefined })
   }
   useEffect(() => {
@@ -491,7 +489,7 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
       </div>
       {characterMode && <FilterPicker label="Character" value={mode === 'job' ? 'job' : character}
         options={characterOptions} onChange={value => {
-        if (value === 'job') setMode('job')
+        if (value === 'job') { if (mode !== 'job') { resetFileLink(); setMode('job') } }
         else if (value !== character || mode !== 'character') { resetFileLink(); setCharacter(value); setMode('character') }
       }} />}
       {mode === 'enemy' && <FilterPicker label="Enemy" value={enemy} options={enemyOptions} onChange={value => {
@@ -500,6 +498,9 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
       {mode === 'gadget' && <FilterPicker label="Gadget" value={gadget} options={gadgetOptions} onChange={value => {
         if (value !== gadget) { resetFileLink(); setGadget(value) }
       }} />}
+      <label className="binoutput-filename">Filter by Filename
+        <input type="search" value={filename} maxLength={120} disabled={!source} onChange={event => setFilename(event.target.value)} />
+      </label>
       <label title="Remove float32 extraction noise from displayed and copied numbers without changing the source files.">
         <input type="checkbox" checked={cleanDecimals} onChange={event => setCleanDecimals(event.target.checked)} />Clean Decimals
       </label>
@@ -513,7 +514,7 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
       {onClose && <button className="icon-button" onClick={onClose} aria-label="Hide game data" title="Hide game data"><X size={16} /></button>}
     </div>
     {error && <div className="error-box" role="alert">{error}</div>}
-    {source ? <Browser key={JSON.stringify(source)} source={source} highlights={highlights} cleanDecimals={cleanDecimals}
+    {source ? <Browser key={JSON.stringify(source)} source={source} highlights={highlights} cleanDecimals={cleanDecimals} filename={filename}
       link={jobId ? undefined : link} listings={listings} /> :
       <div className="empty"><Braces size={28} /><p>Select {mode === 'enemy' ? 'an' : 'a'} {mode} to find its BinOutput files.</p></div>}
   </section>

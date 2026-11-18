@@ -478,7 +478,7 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   Ctrl+S to save); edits overwrite that job's file and keep its line endings.
   Wikitext is shown as syntax-highlighted source, not rendered as HTML or
   expanded MediaWiki templates.
-- **BinOutput Viewer** opens directly without creating a job. Its left-hand
+- **BinOutput Viewer** opens directly without creating a job. Its toolbar's
   **Filter By** offers **None**, **Character**, **Enemy**, and **Gadget** radio
   buttons. Entity dropdowns are searchable by name or ID (and internal name/type
   where available); every match is available by scrolling, with large lists
@@ -486,6 +486,8 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   screen/dialog height and resize with the viewport. Native middle-mouse
   autoscrolling (click or hold-and-drag) is available where supported by the browser.
   Use the arrow keys and Enter to select, or Escape to close the dropdown.
+  **Filter by Filename** sits alongside those controls and searches within the
+  selected scope. Matches appear in the left-hand file pane.
   None browses the complete tree and loads folders on demand; filtered trees
   start fully expanded. Single-subfolder chains appear as compact paths such
   as `Ability / Temp / AvatarAbilities` in either mode.
