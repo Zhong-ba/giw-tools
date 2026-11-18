@@ -8,19 +8,17 @@ import {
 } from 'lucide-react'
   import { AbyssSpiral, BearFace, CrescentBird, HornedMask, StygianBloom, TheaterBook } from './icons'
 import type { Artifact, BotSettings, BotState, Character, Dataset, Job, Parameters, Period, PickerItem, PreparedDatasets, Property, QueueEntry, QueueItem, Revision, ServerConfig, Tool, Versions } from './api'
-import { api, datasetChoice, downloadArchive, hosted, message, serverConfig, setDatasetChoice, useAssetUrl } from './api'
+import { api, datasetChoice, downloadArchive, hosted, message, saveBlob, serverConfig, setDatasetChoice, useAssetUrl } from './api'
 import type { StorageInfo } from './local'
 import { highlightWikitext } from './wikitext'
 import { highlightLua } from './lua'
-import { findJson, sortKeys } from './json'
-import { JsonView } from './JsonView'
-import type { JsonHit } from './JsonView'
 import { boostParty, startParty, stopParty } from './party'
 import { findMatches, markMatches, useFindShortcut } from './search'
 import { SearchBar } from './SearchBar'
 import { OtherLanguages } from './OtherLanguages'
+import { BinOutputViewer } from './BinOutputViewer'
 
-const icons: Record<string, typeof BookOpen> = { 'other-languages': CrescentBird, 'character-kit': BearFace, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, redirects: Link2, enemy: HornedMask,
+const icons: Record<string, typeof BookOpen> = { 'other-languages': CrescentBird, 'binoutput-viewer': Braces, 'character-kit': BearFace, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, 'particle-audit': ChartColumn, redirects: Link2, enemy: HornedMask,
   bounties: Crosshair, 'fishing-points': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianBloom }
 const picksCharacter = (tool: Tool | null) => !!tool && 'character_id' in tool.schema.properties
 const advanced = new Set(['natlan', 'nodkrai', 'hexerei', 'stellar', 'traveler', 'skill_depot'])
@@ -501,144 +499,22 @@ function FilePreview({ jobId, file, editable, shortcut, onDirty }: {
   </div>
 }
 
-interface ReferenceFile { key: string; group: string; name: string; size: number }
-type ReferenceFilter = 'all' | 'attackInfo' | 'elemBall'
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
-const referenceFilters: { id: Exclude<ReferenceFilter, 'all'>; label: string; title: string; groups: string[]; field: string
-  pick: (key: string | null, value: unknown) => unknown }[] = [
-  { id: 'attackInfo', label: 'Attack Info', title: 'Only the attackInfo blocks', groups: ['Avatar', 'Abilities', 'AniEvent', 'Skill Objects'],
-    field: 'attackInfo', pick: (key, value) => key === 'attackInfo' ? value : undefined },
-  { id: 'elemBall', label: 'GenerateElemBall', title: 'Only the actions that generate elemental particles', groups: ['Abilities', 'AniEvent'],
-    field: 'action', pick: (_, value) => isRecord(value) && value.$type === 'GenerateElemBall' ? value : undefined },
-]
-
-function ReferencePanel({ jobId, onClose }: { jobId: string; onClose: () => void }) {
-  const [files, setFiles] = useState<ReferenceFile[] | null>(null)
-  const [character, setCharacter] = useState('')
-  const [selected, setSelected] = useState('')
-  const [text, setText] = useState('')
-  const [filter, setFilter] = useState<ReferenceFilter>('all')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
-  useEffect(() => {
-    const controller = new AbortController()
-    api<{ character: string; files: ReferenceFile[] }>(`/jobs/${jobId}/references`, { signal: controller.signal })
-      .then(result => {
-        setFiles(result.files); setCharacter(result.character); setSelected(result.files[0]?.key ?? '')
-        if (!result.files.length) setLoading(false)
-      })
-      .catch(reason => { if (!controller.signal.aborted) { setError(message(reason)); setLoading(false) } })
-    return () => controller.abort()
-  }, [jobId])
-  useEffect(() => {
-    if (!selected) return
-    const controller = new AbortController()
-    api<{ text: string }>(`/jobs/${jobId}/references/${selected.split('/').map(encodeURIComponent).join('/')}`, { signal: controller.signal })
-      .then(result => {
-        let value = result.text
-        // Re-indent minified files so they are readable.
-        if (!value.slice(0, 200).includes('\n')) { try { value = JSON.stringify(JSON.parse(value), null, 2) } catch { /* keep as is */ } }
-        setText(value)
-      })
-      .catch(reason => { if (!controller.signal.aborted) setError(message(reason)) })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [jobId, selected])
-  const group = files?.find(file => file.key === selected)?.group ?? ''
-  const available = useMemo(() => referenceFilters.filter(item => item.groups.includes(group)), [group])
-  // A filter chosen for one file stays selected while browsing files that support it.
-  const current = available.find(item => item.id === filter)
-  const parsed = useMemo(() => {
-    if (!available.length || !text) return undefined
-    try { return JSON.parse(text) as unknown } catch { return undefined }
-  }, [text, available])
-  const matches = useMemo(() => Object.fromEntries(available.map(item =>
-    [item.id, parsed === undefined ? [] : findJson(parsed, item.pick)])), [parsed, available])
-  // attackInfo contents are shown with their keys sorted, in the full file as well as the filtered view.
-  const sortsAttackInfo = available.some(item => item.id === 'attackInfo')
-  const view = useMemo(() => {
-    const toc: { label: string; line: number; count: number }[] = []
-    if (!current) {
-      const body = parsed !== undefined && sortsAttackInfo
-        ? JSON.stringify(parsed, (key, value: unknown) => key === 'attackInfo' ? sortKeys(value) : value, 2) : text
-      return { lines: body.split('\n'), toc }
-    }
-    const lines = ['[']
-    const all = matches[current.id]
-    all.forEach((match, index) => {
-      const entry = { ...(match.ability ? { ability: match.ability } : {}), path: match.path,
-        [current.field]: current.id === 'attackInfo' ? sortKeys(match.value) : match.value }
-      const body = JSON.stringify(entry, null, 2).split('\n').map(line => `  ${line}`)
-      if (index < all.length - 1) body[body.length - 1] += ','
-      // Gadget and avatar files have no ability names, so their entries are named after the animation event.
-      const label = match.ability ?? match.path.replace(/\.attackInfo$/, '').replace(/(^|\.)combat\.animEvents\./, '$1').replaceAll('.', ' › ')
-      const previous = toc[toc.length - 1]
-      if (previous?.label === label) previous.count++
-      else toc.push({ label, line: lines.length, count: 1 })
-      for (const line of body) lines.push(line)
-    })
-    lines.push(']')
-    return { lines, toc }
-  }, [current, matches, parsed, sortsAttackInfo, text])
-  const [focus, setFocus] = useState<{ line: number } | null>(null)
-  const [searching, setSearching] = useState(false)
-  const [query, setQuery] = useState('')
-  const [hitIndex, setHitIndex] = useState(0)
-  const searchInput = useRef<HTMLInputElement>(null)
-  const needle = searching ? query.toLowerCase() : ''
-  const hits = useMemo(() => {
-    const found: JsonHit[] = []
-    if (!needle) return found
-    view.lines.forEach((line, number) => {
-      const lower = line.toLowerCase()
-      for (let at = lower.indexOf(needle); at !== -1 && found.length < 100000; at = lower.indexOf(needle, at + needle.length)) found.push({ line: number, start: at })
-    })
-    return found
-  }, [needle, view])
-  const activeHit = hits.length ? hits[Math.min(hitIndex, hits.length - 1)] : undefined
-  const step = (direction: number) => { if (hits.length) setHitIndex((Math.min(hitIndex, hits.length - 1) + direction + hits.length) % hits.length) }
-  const openSearch = useCallback(() => { setSearching(true); requestAnimationFrame(() => searchInput.current?.select()) }, [])
-  // Ctrl+F searches the game data instead of the page while this panel is open.
-  useFindShortcut(true, openSearch)
-  const choose = (next: () => void) => { setCopied(false); setFocus(null); next() }
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(view.lines.join('\n')); setCopied(true) }
-    catch (reason) { setError(`Could not copy: ${message(reason)}`) }
-  }
-  const groups = [...new Set((files ?? []).map(file => file.group))]
-  return <div className="preview-panel reference-panel">
-    <div className="preview-header">
-      {files && files.length > 0 ? <select aria-label="Game data file" value={selected}
-        onChange={event => { setLoading(true); setError(''); choose(() => setSelected(event.target.value)) }}>
-        {groups.map(group => <optgroup key={group} label={group}>
-          {files.filter(file => file.group === group).map(file => <option key={file.key} value={file.key}>{file.name} ({size(file.size)})</option>)}
-        </optgroup>)}
-      </select> : <span>Game Data{character && ` · ${character}`}</span>}
-      <div>
-        {text && !loading && <button className="icon-button" onClick={openSearch} aria-label="Search game data" title="Search (Ctrl+F)"><Search size={16} /></button>}
-        {text && !loading && <button className="icon-button" onClick={() => { void copy() }} aria-label="Copy game data" title={current ? 'Copy filtered data' : 'Copy'}>{copied ? <Check size={16} /> : <Copy size={16} />}</button>}
-        <button className="icon-button" onClick={onClose} aria-label="Hide game data" title="Hide game data"><X size={16} /></button>
-      </div>
+function JobProgress({ job }: { job: Job }) {
+  const progress = job.progress
+  const total = progress?.total, completed = progress?.completed
+  const known = job.status === 'running' && total != null && total > 0 && completed != null
+  const percent = job.status === 'succeeded' ? 100 : known ? completed / total * 100 : undefined
+  const stage = job.status === 'queued' ? 'Queued' : job.status === 'failed' ? 'Failed' : progress?.stage ?? (active(job) ? 'Running' : 'Completed')
+  const count = known ? `${completed} / ${total}` : job.status === 'succeeded' ? '100%' : ''
+  const warnings = progress?.warnings ? `${progress.warnings} ${progress.warnings === 1 ? 'warning' : 'warnings'}` : ''
+  return <div className={`job-progress ${job.status}`}>
+    <div><strong>{stage}</strong><span>{[count, warnings].filter(Boolean).join(' · ')}</span></div>
+    <div className={`job-progress-track${active(job) && percent === undefined ? ' indeterminate' : ''}`}
+      role="progressbar" aria-label="Current Stage Progress" aria-valuemin={0} aria-valuemax={100}
+      aria-valuenow={percent} aria-valuetext={known ? `${stage}: ${completed} of ${total}` : stage}>
+      <div style={{ width: percent === undefined ? undefined : `${percent}%` }} />
     </div>
-    {available.length > 0 && !loading && parsed !== undefined && <div className="reference-filters" role="group" aria-label="Filter game data">
-      <button className={!current ? 'selected' : ''} aria-pressed={!current} onClick={() => choose(() => setFilter('all'))}>Full File</button>
-      {available.map(item => <button key={item.id} className={current?.id === item.id ? 'selected' : ''} aria-pressed={current?.id === item.id}
-        title={item.title} onClick={() => choose(() => setFilter(item.id))}>{item.label} <span>{matches[item.id].length}</span></button>)}
-    </div>}
-    {searching && <SearchBar inputRef={searchInput} label="Search game data" query={query} count={hits.length} index={hitIndex}
-      onQuery={value => { setQuery(value); setHitIndex(0) }} onStep={step} onClose={() => setSearching(false)} />}
-    {error && <div className="error-box" role="alert">{error}</div>}
-    {current?.id === 'attackInfo' && view.toc.length > 0 && !loading && <details className="reference-toc" open>
-      <summary>Contents <span>{view.toc.length}</span></summary>
-      <ol>{view.toc.map(entry => <li key={entry.line}>
-        <button onClick={() => setFocus({ line: entry.line })} title={entry.label}>{entry.label}{entry.count > 1 && <span>{entry.count}</span>}</button>
-      </li>)}</ol>
-    </details>}
-    {loading ? <div className="empty"><LoaderCircle className="spin" />Loading game data...</div> :
-      files && !files.length ? <div className="empty"><Braces size={28} /><p>No game data files found for {character || 'this character'}.</p></div> :
-        current && !matches[current.id].length ? <div className="empty"><Braces size={28} /><p>No {current.label} in this file.</p></div> :
-          !error && <JsonView key={`${selected}:${current?.id ?? 'all'}`} lines={view.lines} query={needle} active={activeHit} focus={focus} />}
+    {progress?.message && job.status === 'running' && <span className="muted">{progress.message}</span>}
   </div>
 }
 
@@ -648,6 +524,10 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
   const hasReferences = job.tool_id === 'character-kit' && job.status === 'succeeded'
   const [status, setStatus] = useState(job.status)
   const [logs, setLogs] = useState('')
+  const [logTruncated, setLogTruncated] = useState(false)
+  const [logError, setLogError] = useState('')
+  const [logBusy, setLogBusy] = useState(false)
+  const [copiedLog, setCopiedLog] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Artifact | null>(null)
   const [picked, setPicked] = useState<Set<string>>(() => new Set())
@@ -670,14 +550,25 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
     const load = async () => {
       try {
         const result = await api<{ text: string; truncated: boolean }>(`/jobs/${job.id}/logs`, { signal: controller.signal })
-        setLogs((result.truncated ? '[Showing the most recent log output]\n' : '') + terminal(result.text))
-        setError('')
-      } catch (reason) { if (!controller.signal.aborted) setError(message(reason)) }
+        if (controller.signal.aborted) return
+        setLogs(terminal(result.text))
+        setLogTruncated(result.truncated)
+        setLogError('')
+      } catch (reason) { if (!controller.signal.aborted) setLogError(message(reason)) }
     }
     void load()
-    const timer = setInterval(() => { void load() }, 2000)
+    const timer = job.status === 'running' || job.status === 'queued' ? setInterval(() => { void load() }, 2000) : undefined
     return () => { controller.abort(); clearInterval(timer) }
-  }, [job.id])
+  }, [job.id, job.status])
+  const exportLog = async (copy: boolean) => {
+    setLogBusy(true); setError(''); setCopiedLog(false)
+    try {
+      const result = await api<{ text: string }>(`/jobs/${job.id}/logs?full=true`)
+      if (copy) { await navigator.clipboard.writeText(result.text); setCopiedLog(true) }
+      else saveBlob(new Blob([result.text], { type: 'text/plain;charset=utf-8' }), `${job.tool_id}-${job.id.slice(0, 8)}.log`)
+    } catch (reason) { setError(message(reason)) }
+    finally { setLogBusy(false) }
+  }
   const pages = active(job) ? [] : job.files.filter(queueable)
   const pickedPages = pages.filter(file => picked.has(file.path))
   const enqueue = async (files: Artifact[]) => {
@@ -701,14 +592,24 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
       {!active(job) && <button className="button danger small" onClick={() => { if (discard()) onDelete() }}><Trash2 size={14} /> Delete</button>}
     </>}>
     {job.error && <div className="job-error error-box" role="alert"><CircleAlert size={18} />{job.error} {job.files.length > 0 && 'Files below may be incomplete.'}</div>}
+    <JobProgress job={job} />
     <div className="detail-tabs">
       <button className={tab === 'output' ? 'selected' : ''} onClick={() => setTab('output')}><FolderOpen size={16} /> Output <span>{job.files.length}</span></button>
       <button className={tab === 'logs' ? 'selected' : ''} onClick={() => { if (discard()) setTab('logs') }}><Terminal size={16} /> Log</button>
     </div>
-    {error && <div className="job-error error-box" role="alert">{error}</div>}
+    {(error || logError) && <div className="job-error error-box" role="alert">{error || logError}</div>}
     {queueNote && <div className="job-error queue-note" role="status"><Check size={16} />{queueNote}
       <button className="text-button" onClick={() => { if (discard()) onQueued(true) }}>Open Bot <ArrowRight size={14} /></button></div>}
-    {tab === 'logs' ? <pre className="log-view">{logs || (job.status === 'queued' ? 'Queued.' : 'No log output.')}</pre> :
+    {tab === 'logs' ? <>
+      <div className="log-toolbar">
+        <span className="muted">{logTruncated ? 'Showing the most recent 128 KB. Copy or download for the full log.' : 'Job Log'}</span>
+        <button className="text-button" disabled={logBusy} onClick={() => { void exportLog(true) }}><Copy size={14} />{copiedLog ? 'Copied' : 'Copy Log'}</button>
+        <button className="text-button" disabled={logBusy} onClick={() => { void exportLog(false) }}><ArrowDownToLine size={14} />Download Full Log</button>
+      </div>
+      <pre className="log-view">{logs ? logs.split('\n').map((line, index) =>
+        <span key={index} className={/^\[\d+:\d+\] ERROR/.test(line) ? 'log-error' : /^\[\d+:\d+\] WARNING/.test(line) ? 'log-warning' : undefined}>{line}{'\n'}</span>)
+        : job.status === 'queued' ? 'Queued.' : 'No log output.'}</pre>
+    </> :
       job.files.length === 0 ? <div className="empty"><FolderOpen size={32} /><p>{active(job) ? 'Files appear when the job finishes.' : 'No output files.'}</p></div> :
       <div className={`output-layout${references && hasReferences ? ' with-references' : ''}`}>
         <div className="file-list">
@@ -732,7 +633,7 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
         </div>
         {selectedFile && <FilePreview key={selectedFile.path} jobId={job.id} file={selectedFile} editable={!active(job)}
           shortcut={!(references && hasReferences)} onDirty={value => { dirty.current = value }} />}
-        {references && hasReferences && <ReferencePanel jobId={job.id} onClose={() => setReferences(false)} />}
+        {references && hasReferences && <BinOutputViewer jobId={job.id} onClose={() => setReferences(false)} />}
       </div>}
   </Dialog>
 }
@@ -1357,6 +1258,8 @@ function App() {
     </div>
     {selectedTool && (selectedTool.id === 'other-languages'
       ? <Dialog title={selectedTool.name} subtitle={selectedTool.description} wide onClose={() => setSelectedTool(null)}><OtherLanguages /></Dialog>
+      : selectedTool.id === 'binoutput-viewer'
+        ? <Dialog title={selectedTool.name} subtitle={selectedTool.description} wide onClose={() => setSelectedTool(null)}><BinOutputViewer characters={characters} /></Dialog>
       : <ToolForm key={selectedTool.id} tool={selectedTool} characters={characters} characterError={characterError} submitting={submitting} error={formError} onSubmit={parameters => { void run(parameters) }} onClose={() => setSelectedTool(null)} />)}
     {currentJob && <JobDialog key={currentJob.id} job={currentJob} onClose={() => setSelectedJob(null)} onDelete={() => deleteJob(currentJob)}
       onQueued={open => { void refresh(); if (open) { setSelectedJob(null); setPage('bot') } }} />}

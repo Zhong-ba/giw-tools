@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.pageinfo import pageinfo
 from utils.periods import DAY_START, TIME_FORMAT, events as _events, stygian_end, times as _times, wiki_version
 
@@ -68,7 +69,7 @@ class Text:
                 self.highlights = json.load(file)
         except FileNotFoundError:
             self.highlights = {}
-            print('TextMapEN_Highlights.json is missing; run the dataset setup again to show highlighted text like the wiki.')
+            report.warning('TextMapEN_Highlights.json is missing; run the dataset setup again to show highlighted text like the wiki.')
         self.sprites = {row['Id']: row for row in _load('SpriteTagExcelConfigData')}
 
     def raw(self, value):
@@ -353,9 +354,10 @@ def stygian_page(start=None, version=''):
 
 def write_stygian_page(start=None, version='', directory=None):
     '''Writes the event's page to directory (default OutputPath) and returns its path.'''
+    report.stage(f'Building Stygian Onslaught event: {start or "latest"}')
     title, text = stygian_page(start, version)
     path = Path(directory or CONFIG.OUTPUT_PATH) / f'{title.replace("/", " ")}.wikitext'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding='utf-8')
-    print(f'Wrote {title} to {path}.', flush=True)
+    report.info(f'Wrote {title} to {path.name}.')
     return path

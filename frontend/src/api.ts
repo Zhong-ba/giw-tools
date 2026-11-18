@@ -35,6 +35,7 @@ export interface Job {
   error: string | null
   files: Artifact[]
   parameters?: Parameters
+  progress?: { stage: string; completed: number | null; total: number | null; message: string; warnings: number } | null
 }
 export interface Dataset {
   source: string | null

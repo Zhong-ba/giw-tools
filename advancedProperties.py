@@ -240,6 +240,9 @@ def _character(character_id: int, skill_depot: int | None) -> SimpleNamespace:
         raise ValueError(f'Character {character_id} is not in the dataset.')
     if skill_depot is None and avatar.get('CandSkillDepotIds'):
         raise ValueError('Choose a skill depot for characters with selectable elements, such as the Traveler.')
+    from travelerKits import TRAVELER_IDS
+    if character_id in TRAVELER_IDS and skill_depot not in (avatar.get('CandSkillDepotIds') or []):
+        raise ValueError(f'Skill depot {skill_depot} does not belong to Traveler {character_id}.')
     name = avatar.get('IconName', '').removeprefix('UI_AvatarIcon_')
     depot = next((item for item in _load(excel / 'AvatarSkillDepotExcelConfigData.json')
                   if item.get('Id') == (skill_depot or avatar.get('SkillDepotId'))), None)
@@ -261,6 +264,8 @@ def _character(character_id: int, skill_depot: int | None) -> SimpleNamespace:
     talent_files.sort(key=lambda path: path.stem.lower() != f'configtalent_{name}'.lower())
     skill_configs = {proud.get((groups.get(skill_id), 1), {}).get('OpenConfig') for skill_id in skill_ids.values()} - {None, ''}
     names = {name} | {re.sub(r'_SkillUpgrade_\d+$', '', config) for config in skill_configs}
+    if character_id in TRAVELER_IDS:
+        names.add('Player_Common')
     files = list(dict.fromkeys(path for file_name in sorted(names) for path in character_files(bin_path, file_name)))
     return SimpleNamespace(excel=excel, avatar=avatar, depot=depot, skill_ids=skill_ids, groups=groups, proud=proud,
                            attenuation=attenuation, talent_files=talent_files, skill_configs=skill_configs, files=files,
@@ -382,7 +387,11 @@ def _skill_rows(character: SimpleNamespace, combat: bool = False) -> dict[str, l
 
     pages = {talent: [] for talent in TALENT_KEYS}
     seen = set()
-    for appearance, (_, path, info) in enumerate(attacks):
+    from travelerKits import TRAVELER_IDS
+    other_traveler = 'PlayerGirl' if character.avatar['Id'] == 10000005 else 'PlayerBoy'
+    for appearance, (ability, path, info) in enumerate(attacks):
+        if character.avatar['Id'] in TRAVELER_IDS and ability and other_traveler in ability:
+            continue
         found = _find_labels(info, path, events, labels)
         if not found:
             continue

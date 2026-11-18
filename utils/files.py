@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import toolLog as report
 
 # Generated media can carry the text of its wiki File page in a hidden manifest beside it,
 # which the bot uses as the description page when uploading.
@@ -20,7 +21,7 @@ def write_file(filename, content, overwrite = False):
     with open(new_filename, 'w', encoding = 'utf-8') as file:
         file.write(content)
         
-    print(f"File saved successfully: {new_filename}")
+    report.debug('Saved %s', new_filename)
 
 
 def _file_pages(directory):
@@ -51,6 +52,6 @@ def copy_file(source_path, destination_path):
         if not os.path.exists(dest_dir):
             os.makedirs(dest_dir)
         shutil.copy(source_path, destination_path)
-        print(f"File copied successfully from {source_path} to {destination_path}")
+        report.debug('Copied %s to %s', source_path, destination_path)
     else:
-        print(f"The file {source_path} does not exist.")
+        report.warning(f'Cannot copy missing file: {source_path}')

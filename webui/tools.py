@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 import runpy
@@ -8,6 +9,7 @@ from typing import Annotated, Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, field_validator
 
 from dataSource import ROOT
+import toolLog as report
 
 
 # Image asset features (icon generation) need an up-to-date texture extraction; set to True once one is available.
@@ -65,7 +67,9 @@ class CharacterInputs(Inputs):
     model_config = ConfigDict(extra='forbid', json_schema_extra=_hide_image_fields)
 
     character_id: int = Field(ge=1, le=999999999, title='Character')
-    version: str = Field(min_length=1, max_length=32, title='Introduced in version', description='Used in the generated Change History templates.')
+    version: str = Field(min_length=1, max_length=32, title='Introduced in version',
+                         description='Used in the generated Change History templates. All-element Traveler jobs look '
+                                     'up the release version separately for each element.')
     element: Literal['Pyro', 'Hydro', 'Anemo', 'Electro', 'Dendro', 'Cryo', 'Geo'] = Field(default='Pyro', title='Icon background element')
     generate_icons: bool = Field(default=False, title='Generate talent and constellation icons',
                                  description='Requires local extracted textures and talent backgrounds.')
@@ -73,19 +77,26 @@ class CharacterInputs(Inputs):
     nodkrai: bool = Field(default=False, title='Moonsign')
     hexerei: bool = Field(default=False, title="Hexerei")
     stellar: bool = Field(default=False, title='Stellar')
-    traveler: bool = Field(default=False, title='Traveler')
+    traveler: bool = Field(default=False, title='Traveler',
+                           description='Detected automatically for Aether and Lumine. Generates every complete elemental '
+                                       'kit in separate folders unless a skill depot override selects one.')
     skill_depot: int | None = Field(default=None, ge=1, title='Skill depot override',
-                                   description='Optional advanced override, including Traveler variants.')
+                                   description='Optional advanced override. For Traveler, selects one elemental kit '
+                                               'instead of generating all seven.')
     attribute_scaling: bool = Field(default=True, title='Include Attribute Scaling',
                                     description='Fills the talent pages\' Attribute Scaling sections. Requires Node.js.')
     advanced_properties: bool = Field(default=True, title='Include Advanced Properties',
                                       description='Fills the Advanced Properties of the talent pages, and of the passive '
                                                   'and constellation pages that deal damage, from the attack data. '
                                                   'Review titles and remove attacks the wiki does not list.')
+    particle_generation: bool = Field(default=True, title='Include Particle Generation',
+                                      description='Adds reviewed particle notes to the Elemental Skill and enables '
+                                                  'Energy/Data output. Unreviewed cases only produce a JSON review report.')
     data_pages: bool = Field(default=True, title='Update Combat Data Pages',
                              description='Adds the character to the current revisions of the Elemental Gauge, Internal '
-                                         'Cooldown, Area of Effect, Hitlag and Targeting data pages. Requires Advanced '
-                                         'Properties; review the generated rows before posting.')
+                                         'Cooldown, Area of Effect, Hitlag, Targeting and Energy data pages. The first '
+                                         'five require Advanced Properties; Energy requires Particle Generation. '
+                                         'Review the generated rows before posting.')
     update_existing: bool = Field(default=False, title='Update Existing Entries',
                                  description="Replaces this character's existing combat data rows. Requires Update Combat "
                                              'Data Pages; review carefully because wiki edits and notes may be replaced.')
@@ -180,13 +191,14 @@ def redirects(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = RedirectInputs.model_validate(parameters)
     from utils.redirect import main_redirect
 
-    for line in inputs.lines.splitlines():
+    for line in report.track(inputs.lines.splitlines(), 'Writing redirects'):
         source, target = line.split('%%%')
         main_redirect(source.strip(), target.strip())
 
 
 def character_kit(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = CharacterInputs.model_validate(parameters)
+    report.stage(f'Loading Character Kit: {inputs.character_id}')
     from getConfig import CONFIG
 
     if inputs.generate_icons:
@@ -214,6 +226,8 @@ def character_kit(output: Path, parameters: dict[str, JsonValue]) -> None:
         arguments.extend(['--noscaling', 'True'])
     if not inputs.advanced_properties:
         arguments.extend(['--noap', 'True'])
+    if not inputs.particle_generation:
+        arguments.append('--noparticles')
     if not inputs.data_pages:
         arguments.extend(['--nodatapages', 'True'])
     elif inputs.update_existing:
@@ -241,7 +255,7 @@ def attribute_scaling(output: Path, parameters: dict[str, JsonValue]) -> None:
     from talentScaling import talent_scaling
 
     talents = talent_scaling(inputs.character_id, inputs.normal_attack, inputs.elemental_skill, inputs.elemental_burst)
-    for number, (_, name, template) in enumerate(talents, 1):
+    for number, (_, name, template) in enumerate(report.track(talents, 'Writing talent scaling tables'), 1):
         filename = f'{number} - {UNSAFE_FILENAME.sub("", name).strip()}.wikitext'
         (output / filename).write_text(template + '\n', encoding='utf-8')
 
@@ -250,6 +264,7 @@ UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 def enemy(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = EnemyInputs.model_validate(parameters)
+    report.stage(f'Loading {len(inputs.enemy_ids)} selected enemies')
     from types import SimpleNamespace
     import OLGen
     from utils.enemies import parse_enemies
@@ -257,7 +272,7 @@ def enemy(output: Path, parameters: dict[str, JsonValue]) -> None:
     OLGen.load_data()
     count = parse_enemies(SimpleNamespace(ver=inputs.version), OLGen.gen_ol, inputs.enemy_ids, icons=IMAGE_ASSETS,
                           stats_file='Enemy Stats.wikitext')
-    print(f'Generated {count} enemy page{"" if count == 1 else "s"}.', flush=True)
+    report.info(f'Generated {count} enemy page{"" if count == 1 else "s"}.')
 
 
 def fishing_points(output: Path, parameters: dict[str, JsonValue]) -> None:
@@ -265,14 +280,16 @@ def fishing_points(output: Path, parameters: dict[str, JsonValue]) -> None:
     from utils.fishing import write_fishing_points
 
     count = write_fishing_points(inputs.pool_ids, str(output))
-    print(f'Generated {count} fishing point page{"" if count == 1 else "s"}.', flush=True)
+    report.info(f'Generated {count} fishing point page{"" if count == 1 else "s"}.')
 
 
 def bounties(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = BountyInputs.model_validate(parameters)
     from utils.hunting import bounties_wikitext
 
-    (output / 'Bounties.wikitext').write_text(bounties_wikitext(inputs.bounty_ids) + '\n', encoding='utf-8')
+    text = bounties_wikitext(inputs.bounty_ids)
+    report.stage('Writing bounty output')
+    (output / 'Bounties.wikitext').write_text(text + '\n', encoding='utf-8')
 
 
 def fish_weights(output: Path, parameters: dict[str, JsonValue]) -> None:
@@ -280,7 +297,7 @@ def fish_weights(output: Path, parameters: dict[str, JsonValue]) -> None:
     from utils.fishing import write_fish_weights
 
     count = write_fish_weights(str(output))
-    print(f'Wrote spawn weights for {count} fish.', flush=True)
+    report.info(f'Wrote spawn weights for {count} fish.')
 
 
 def character_data(output: Path, parameters: dict[str, JsonValue]) -> None:
@@ -288,7 +305,20 @@ def character_data(output: Path, parameters: dict[str, JsonValue]) -> None:
     from utils.charasc import write_character_data
 
     characters, talents = write_character_data(str(output))
-    print(f'Wrote ascension data for {characters} characters and talent materials for {talents} entries.', flush=True)
+    report.info(f'Wrote ascension data for {characters} characters and talent materials for {talents} entries.')
+
+
+def particle_audit(output: Path, parameters: dict[str, JsonValue]) -> None:
+    Inputs.model_validate(parameters)
+    from particleAudit import audit_coverage
+
+    report.stage('Auditing particle coverage')
+    result = audit_coverage()
+    (output / 'Particle Coverage Audit.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+    report.info(json.dumps(result['summary']))
+    report.info('Primary blockers: ' + json.dumps(result['primary_blockers']))
+    if result['summary']['error']:
+        raise RuntimeError(f'Particle audit contains {result["summary"]["error"]} extraction errors; review the JSON report.')
 
 
 def manual_cooking(output: Path, parameters: dict[str, JsonValue]) -> None:
@@ -298,14 +328,16 @@ def manual_cooking(output: Path, parameters: dict[str, JsonValue]) -> None:
     parse_cooking_qte()
     if inputs.images != 'none':
         drawn = cooking_qte_2(only_missing=inputs.images == 'missing')
-        print(f'Drew {len(drawn)} dial image{"" if len(drawn) == 1 else "s"}.', flush=True)
+        report.info(f'Processed {len(drawn)} dial images.')
+    else:
+        report.info('Dial image generation disabled by request.')
 
 
 def spiral_abyss(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = AbyssInputs.model_validate(parameters)
     from utils.abyss import write_abyss_page
 
-    for start in dict.fromkeys(inputs.starts) or [None]:
+    for start in report.track(list(dict.fromkeys(inputs.starts)) or [None], 'Generating Spiral Abyss rotations'):
         write_abyss_page(start, inputs.version.strip(), str(output))
 
 
@@ -315,7 +347,7 @@ def stygian_onslaught(output: Path, parameters: dict[str, JsonValue]) -> None:
     from utils.stygian import write_stygian_page
 
     OLGen.load_data()
-    for start in dict.fromkeys(inputs.starts) or [None]:
+    for start in report.track(list(dict.fromkeys(inputs.starts)) or [None], 'Generating Stygian Onslaught events'):
         write_stygian_page(start, inputs.version.strip(), str(output))
 
 
@@ -323,7 +355,7 @@ def imaginarium_theater(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = TheaterInputs.model_validate(parameters)
     from utils.theater import write_theater_page
 
-    for start in dict.fromkeys(inputs.starts) or [None]:
+    for start in report.track(list(dict.fromkeys(inputs.starts)) or [None], 'Generating Imaginarium Theater seasons'):
         write_theater_page(start, inputs.version.strip(), str(output))
 
 
@@ -334,15 +366,13 @@ class Tool:
     category: str
     description: str
     model: type[Inputs]
-    execute: Callable[[Path, dict[str, JsonValue]], None]
+    execute: Callable[[Path, dict[str, JsonValue]], None] | None
     requires_dataset: bool = True
+    hidden: bool = False
 
 
 TOOLS = {
     tool.id: tool for tool in (
-        Tool('other-languages', 'Other Languages', 'Localization',
-             'Generate an Other Languages template based on the current data source.',
-             LanguageInputs, other_languages),
         Tool('character-kit', 'Character Kit', 'Characters',
              'Generate talent, passive, and constellation pages'
              + (', with optional icons.' if IMAGE_ASSETS else '.'),
@@ -353,6 +383,9 @@ TOOLS = {
         Tool('character-data', 'Character Data', 'Characters',
              'Generate Module:Character Ascensions and Stats/data and Module:Talent Upgrade/data for every character.',
              Inputs, character_data),
+        Tool('particle-audit', 'Particle Coverage Audit', 'Characters',
+             'Audit particle-generation coverage for every character and skill depot, grouped by review blocker.',
+             Inputs, particle_audit, hidden=True),
         Tool('enemy', 'Enemy', 'Enemies',
              'Generate pages and stat tables for any enemies, or those added between two versions.',
              EnemyInputs, enemy),
@@ -377,6 +410,12 @@ TOOLS = {
         Tool('bounties', 'Bounties', 'World',
              'Generate Player\'s Choice bounty entries for the Bounty/List page.',
              BountyInputs, bounties),
+        Tool('other-languages', 'Other Languages', 'Utilities',
+             'Generate an Other Languages template based on the current data source.',
+             LanguageInputs, other_languages),
+        Tool('binoutput-viewer', 'BinOutput Viewer', 'Utilities',
+             'Browse BinOutput JSON files, or find files relevant to a character, enemy, or gadget.',
+             Inputs, None),
         Tool('redirects', 'Redirect Builder', 'Utilities',
              'Create a batch of wiki redirect pages from simple source and target pairs.',
              RedirectInputs, redirects, requires_dataset=False),

@@ -6,25 +6,25 @@ import json
 import os
 from pathlib import Path
 import sys
-import traceback
 from types import ModuleType
 
 from dataSource import ROOT, data_root
+import toolLog as report
 
 # Modules that survive between jobs in the resident worker. Everything else imported from
 # this repository is re-imported per job, because legacy modules read the config at import.
-PERSISTENT = {'OLGen', 'dataSource'}
+PERSISTENT = {'OLGen', 'dataSource', 'toolLog'}
 
 
 def setup(directory: Path) -> None:
     with (directory / 'request.json').open(encoding='utf-8') as file:
         request = json.load(file)
     from setupData import prepare
+    report.stage('Preparing dataset')
     dataset = prepare(Path(request['config_path']))
     (directory / 'output' / 'dataset.json').write_text(
         json.dumps({'dataset': str(dataset), 'status': 'ready'}, indent=2), encoding='utf-8',
     )
-    print('Job completed successfully.', flush=True)
 
 
 def _purge_job_modules() -> None:
@@ -49,12 +49,12 @@ def _shared_textmaps(dataset: str, cache: Path) -> ModuleType:
     module = importlib.import_module('OLGen')
 
     def load_index(progress_callback=None):
-        print('Opening persistent Other Languages index (builds it if needed).', flush=True)
+        report.stage('Opening persistent Other Languages index (building it if needed)')
         path = ensure_index(Path(dataset) / 'TextMap', cache)
         module.data = {language: IndexedTextMap(path, language) for language in module.LANGS}
         if progress_callback:
             progress_callback(len(module.LANGS), len(module.LANGS))
-        print('Using persistent Other Languages index.', flush=True)
+        report.info('Using persistent Other Languages index.')
 
     def find_text_id(text, input_lang='EN'):
         return module.data[input_lang].find_id(text)
@@ -72,6 +72,8 @@ def run_tool(directory: Path) -> None:
     os.environ['GENSHIN_TOOLS_CONFIG'] = str(config)
     _purge_job_modules()
     tool = importlib.import_module('webui.tools').TOOLS[request['tool_id']]
+    if tool.execute is None:
+        raise ValueError(f'{tool.name} runs directly without creating a job.')
     if tool.requires_dataset:
         _shared_textmaps(json.loads(config.read_text(encoding='utf-8'))['RepoPath'],
                         data_root(Path(request['config_path'])) / 'ol')
@@ -80,7 +82,6 @@ def run_tool(directory: Path) -> None:
         tool.execute(directory / 'output', request['parameters'])
     finally:
         sys.argv = argv
-    print('Job completed successfully.', flush=True)
 
 
 def serve(connection) -> None:
@@ -96,21 +97,37 @@ def serve(connection) -> None:
         if directory is None:
             return
         error = None
-        with open(Path(directory) / 'log.txt', 'w', encoding='utf-8', buffering=1) as log:
-            with redirect_stdout(log), redirect_stderr(log):
+        with open(Path(directory) / 'log.txt', 'a', encoding='utf-8', buffering=1) as log:
+            metadata = json.loads((Path(directory) / 'job.json').read_text(encoding='utf-8'))
+            report.configure(log, Path(directory) / 'progress.json', metadata['started_at'])
+            stream = report.LogStream()
+            with redirect_stdout(stream), redirect_stderr(stream):
                 try:
                     run_tool(Path(directory))
                 except SystemExit as exit_request:
                     if exit_request.code not in (None, 0):
                         error = f'The tool exited with code {exit_request.code}. Open the log for details.'
-                        traceback.print_exc()
+                        report.logger.exception(error)
                 except Exception as failure:
                     error = f'{type(failure).__name__}: {failure}'
-                    traceback.print_exc()
+                    report.logger.exception(error)
+                finally:
+                    stream.flush()
         connection.send(error)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('directory', type=Path)
-    setup(parser.parse_args().directory.resolve())
+    directory = parser.parse_args().directory.resolve()
+    metadata = json.loads((directory / 'job.json').read_text(encoding='utf-8'))
+    report.configure(sys.stdout, directory / 'progress.json', metadata['started_at'])
+    stream = report.LogStream()
+    with redirect_stdout(stream), redirect_stderr(stream):
+        try:
+            setup(directory)
+        except Exception:
+            report.logger.exception('Dataset setup failed.')
+            raise SystemExit(1)
+        finally:
+            stream.flush()

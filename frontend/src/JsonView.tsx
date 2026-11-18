@@ -1,12 +1,11 @@
 ﻿import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { jsonTokens } from './json'
+import { JSON_HIGHLIGHTS, jsonTokens } from './json'
 
 const LINE_HEIGHT = 21
 const PADDING = 16
 const OVERSCAN = 40
-// Lines whose key is one of these are tinted so damage-relevant fields stand out.
-const MARKED_KEY = /^\s*"(attackTag|hitImpulseType|elementDurability|enBreak|attenuationTag|attenuationGroup)"\s*:/
+const ALL_HIGHLIGHTS = JSON_HIGHLIGHTS.map(rule => rule.id)
 
 export interface JsonHit { line: number; start: number }
 
@@ -41,7 +40,9 @@ function renderLine(line: string, query: string, active: number | undefined): Re
  * `query` (lowercase) marks search matches, `active` is scrolled into view, and a new `focus` object
  * scrolls its line to the top.
  */
-export function JsonView({ lines, query = '', active, focus }: { lines: string[]; query?: string; active?: JsonHit; focus?: { line: number } | null }) {
+export function JsonView({ lines, query = '', active, focus, highlights = ALL_HIGHLIGHTS }: {
+  lines: string[]; query?: string; active?: JsonHit; focus?: { line: number } | null; highlights?: readonly string[]
+}) {
   const width = useMemo(() => lines.reduce((longest, line) => Math.max(longest, line.length), 0), [lines])
   const ref = useRef<HTMLDivElement>(null)
   const [top, setTop] = useState(0)
@@ -77,7 +78,7 @@ export function JsonView({ lines, query = '', active, focus }: { lines: string[]
       <code style={{ transform: `translateY(${first * LINE_HEIGHT}px)` }}>
         {lines.slice(first, last).map((line, index) => {
           const number = first + index
-          return <div key={number} className={MARKED_KEY.test(line) ? 'json-line marked' : 'json-line'}>
+          return <div key={number} className={JSON_HIGHLIGHTS.some(rule => highlights.includes(rule.id) && rule.test.test(line)) ? 'json-line marked' : 'json-line'}>
             {renderLine(line, query, active?.line === number ? active.start : undefined)}
           </div>
         })}

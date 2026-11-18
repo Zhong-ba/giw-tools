@@ -98,6 +98,7 @@ function main() {
   parser.add_argument("-c", "--chapterId", { help: "Chapter ID." });
   parser.add_argument("-charName", "--characterName", { help: "Character Name, separated by semicolon." });
   parser.add_argument("-charId", "--characterId", { help: "Character Id, separated by semicolon." });
+  parser.add_argument("-skillDepot", "--skillDepot", { type: "int", help: "Skill depot override for abilities, including Traveler elements." });
   parser.add_argument("-l", "--levels", { help: "Max talent scaling level, separated by semicolon." });
   parser.add_argument("-s", "--scheduleId", { help: "Schedule ID." });
   parser.add_argument("-t", "--toText", { action: "store_const", const: true, help: "Convert to Text." });
@@ -121,6 +122,7 @@ function main() {
   if (parsed_args.chapterId) OPTIONS.chapterId = parsed_args.chapterId;
   if (parsed_args.characterName) OPTIONS.characterName = parsed_args.characterName;
   if (parsed_args.characterId) OPTIONS.characterId = parseInt(parsed_args.characterId);
+  if (parsed_args.skillDepot) OPTIONS.skillDepot = parsed_args.skillDepot;
   if (parsed_args.levels) OPTIONS.levels = String(parsed_args.levels).split(";");
   if (parsed_args.scheduleId) OPTIONS.scheduleId = parsed_args.scheduleId;
   if (parsed_args.toText) OPTIONS.toText = parsed_args.toText;
@@ -242,7 +244,7 @@ function main() {
     if (OPTIONS.print) console.log(stringify(result, { maxLength: 100 }));
     else {
       writeFileSync(join(OPTIONS.output_dir, OPTIONS.output_file), OPTIONS.output_file.includes(".json") ? stringify(result, { maxLength: 100 }) : result);
-      console.log(`Saved ${OPTIONS.output_file}`);
+      if (OPTIONS.debug) console.log(`Saved ${OPTIONS.output_file}`);
     }
   }
 }
@@ -806,7 +808,15 @@ function getCharacter(mode, characterId) {
         // An Id selects that avatar only; names also match same-named test avatars.
         res = (typeof characterId == "number" ? character : EXCELS.AvatarExcelConfigData.filter(a => character.some(b => a.NameTextMapHash.includes(b.NameTextMapHash)))).map(avatar => {
           let result = {}
-          if (avatar.CandSkillDepotIds?.length > 0) {
+          if (OPTIONS.skillDepot) {
+            const depot = EXCELS.AvatarSkillDepotExcelConfigData.find(d => d.Id == OPTIONS.skillDepot);
+            if (!depot) throw new Error(`Skill depot ${OPTIONS.skillDepot} does not exist.`);
+            if (avatar.CandSkillDepotIds?.length > 0 && !avatar.CandSkillDepotIds.includes(OPTIONS.skillDepot)) {
+              throw new Error(`Skill depot ${OPTIONS.skillDepot} does not belong to character ${avatar.Id}.`);
+            }
+            result.name = avatar.NameTextMapHash;
+            result.abilities = getCharacterAbilities(depot);
+          } else if (avatar.CandSkillDepotIds?.length > 0) {
             if (avatar.BodyType == "BODY_GIRL") result.name = "Lumine";
             else if (avatar.BodyType == "BODY_BOY") result.name = "Aether";
             result.elements = avatar.CandSkillDepotIds.map(id => getCharacterAbilities(EXCELS.AvatarSkillDepotExcelConfigData.find(d => d.Id == id))).filter(e => e.talents[0].name != "")

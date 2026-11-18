@@ -2,6 +2,7 @@ import argparse
 import os
 
 import OLGen
+import toolLog as report
 
 from getConfig import CONFIG
 
@@ -43,7 +44,7 @@ def old_table(table):
     if commit == 'previous':
         revision = previous_version_revision()
         commit = revision['commit']
-        print(f'Comparing with {revision["title"]} ({commit[:8]}).')
+        report.info(f'Comparing with {revision["title"]} ({commit[:8]}).')
     return excel_table_at(commit, table)
 
 
@@ -66,11 +67,11 @@ if args.fishingpoints:
 
 if args.fishweights:
     from utils.fishing import write_fish_weights
-    print(f'Wrote spawn weights for {write_fish_weights()} fish.')
+    report.info(f'Wrote spawn weights for {write_fish_weights()} fish.')
 
 if args.chardata:
     from utils.charasc import write_character_data
-    print('Wrote ascension data for {} characters and talent materials for {} entries.'.format(*write_character_data()))
+    report.info('Wrote ascension data for {} characters and talent materials for {} entries.'.format(*write_character_data()))
 
 if args.huntingv2:
     from utils.hunting import parse_hunting_v2

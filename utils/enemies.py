@@ -4,6 +4,7 @@ import json
 import Levenshtein # type: ignore
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.files import write_file, copy_file
 from utils.monsterConfig import monster_property
 from utils.redirect import file_redirect
@@ -463,11 +464,11 @@ def write_enemy_pages(args, gen_ol, rows, icons = True):
     with open(f'{CONFIG.EXCEL_PATH}/AnimalCodexExcelConfigData.json', 'r', encoding = 'utf-8') as file:
         codexexcel = {item['Id']: item for item in json.load(file)}
         
-    for item in rows:
+    for item in report.track(rows, 'Generating enemy pages'):
         mons_id = item.get('Id')
         name = item.get('DescribeName')
         
-        print(f'====={mons_id}: {name}=====')
+        report.info(f'Processing enemy: {name} ({mons_id})')
         
         particles = parse_enemy_particles(item)
         

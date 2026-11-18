@@ -28,7 +28,9 @@ from setupData import excel_table_at, game_version, list_revisions
 from webui.bot import BotManager, BotState, QueueItem, RelayLogin, RelayPost, SettingsUpdate, WikiError, WikiRelay
 from webui.datasets import parse_choice, prepared_datasets, resolve_choice
 from webui.jobs import Job, JobManager, QueueFullError
-from webui.references import character_references
+from webui.references import (
+    binoutput_path, binoutput_tree, character_references, enemy_references, gadget_references, gadget_rows, read_reference,
+)
 from webui.tools import TOOLS, LanguageInputs
 from webui.languages import language_results
 
@@ -283,7 +285,7 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
         return [
             ToolInfo(id=tool.id, name=tool.name, category=tool.category, description=tool.description,
                      requires_dataset=tool.requires_dataset, schema_=tool.model.model_json_schema())
-            for tool in TOOLS.values()
+            for tool in TOOLS.values() if not tool.hidden
         ]
 
     revision_cache: dict[str, tuple[float, list[dict]]] = {}
@@ -458,13 +460,16 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
         item = next((item for item in found if item['key'] == key), None)
         if item is None:
             raise HTTPException(404, 'Reference file not found.')
-        if item['size'] > 16 * 1048576:
-            raise HTTPException(413, 'This file is too large to view.')
-        return {'text': item['text'] if item['path'] is None else item['path'].read_text(encoding='utf-8')}
+        try:
+            return {'text': read_reference(item)}
+        except OverflowError as error:
+            raise HTTPException(413, str(error)) from error
+        except (OSError, ValueError) as error:
+            raise HTTPException(409, str(error)) from error
 
-    def reference_list(name: str, found: list[dict]) -> dict:
-        return {'character': name, 'files': [
-            {'key': item['key'], 'group': item['group'], 'name': item['name'], 'size': item['size']} for item in found]}
+    def reference_list(name: str, found: list[dict], warnings=()) -> dict:
+        return {'character': name, 'warnings': warnings, 'files': [
+            {key: item[key] for key in ('key', 'relative', 'group', 'name', 'size', 'reasons')} for item in found]}
 
     @application.get('/api/characters/{character_id}/references')
     def character_reference_list(character_id: int, config: dict = Depends(prepared)):
@@ -473,6 +478,61 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
     @application.get('/api/characters/{character_id}/references/{key:path}')
     def character_reference(character_id: int, key: str, config: dict = Depends(prepared)):
         return reference_text(found_references(config, character_id)[1], key)
+
+    def binoutput_references(config, character_id, enemy_id, gadget_id):
+        if sum(value is not None for value in (character_id, enemy_id, gadget_id)) > 1:
+            raise HTTPException(422, 'Choose only one character, enemy, or gadget.')
+        try:
+            if character_id is not None:
+                return character_references(config, character_id)
+            if enemy_id is not None:
+                return enemy_references(config, enemy_id)
+            if gadget_id is not None:
+                return gadget_references(config, gadget_id)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(409, str(error)) from error
+        raise HTTPException(422, 'Choose a character, enemy, or gadget.')
+
+    @application.get('/api/binoutput/tree')
+    def binoutput_directory(path: str = Query('', max_length=4096), config: dict = Depends(prepared)):
+        try:
+            return binoutput_tree(config, path)
+        except FileNotFoundError as error:
+            raise HTTPException(404, str(error)) from error
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except OSError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @application.get('/api/binoutput/references')
+    def binoutput_reference_list(character_id: int | None = Query(None, ge=1),
+                                 enemy_id: int | None = Query(None, ge=1),
+                                 gadget_id: int | None = Query(None, ge=1), config: dict = Depends(prepared)):
+        name, found, warnings = binoutput_references(config, character_id, enemy_id, gadget_id)
+        result = reference_list(name, found, warnings)
+        for item in result['files']:
+            item['key'] = item['relative']
+        return result
+
+    @application.get('/api/binoutput/file')
+    def binoutput_file(path: str = Query(..., min_length=1, max_length=4096),
+                       character_id: int | None = Query(None, ge=1), enemy_id: int | None = Query(None, ge=1),
+                       gadget_id: int | None = Query(None, ge=1),
+                       config: dict = Depends(prepared)):
+        if character_id is not None or enemy_id is not None or gadget_id is not None:
+            found = binoutput_references(config, character_id, enemy_id, gadget_id)[1]
+            return reference_text([{**item, 'key': item['relative']} for item in found], path)
+        try:
+            file = binoutput_path(config, path)
+            return {'text': read_reference({'path': file})}
+        except OverflowError as error:
+            raise HTTPException(413, str(error)) from error
+        except FileNotFoundError as error:
+            raise HTTPException(404, str(error)) from error
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except OSError as error:
+            raise HTTPException(409, str(error)) from error
 
     def mapped_table(config: dict, name: str, setting: str = 'RepoPath') -> list[dict]:
         path = Path(config[setting]) / 'MappedExcelBinOutput_EN' / f'{name}.json'
@@ -555,6 +615,16 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
             raise HTTPException(409, str(error)) from error
         return sorted(({'id': row['Id'], 'name': row['DescribeName'], 'internal': row.get('MonsterName') or ''}
                        for row in rows), key=lambda item: (item['name'].lower(), item['id']))
+
+    @application.get('/api/gadgets')
+    def gadgets(config: dict = Depends(prepared)):
+        try:
+            rows = gadget_rows(config)
+            return sorted(({'id': row['Id'], 'name': row.get('JsonName') or 'Unnamed Gadget',
+                            'internal': row.get('Type') or ''} for row in rows),
+                          key=lambda item: (item['name'].casefold(), item['id']))
+        except (OSError, ValueError, KeyError) as error:
+            raise HTTPException(409, str(error)) from error
 
     @application.get('/api/fishing-points')
     def fishing_point_list(older: str | None = Query(None, pattern=BUILD), newer: str = Query('current', pattern=BUILD),
@@ -652,16 +722,16 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
             raise HTTPException(409, str(error)) from error
 
     @application.get('/api/jobs/{job_id}/logs')
-    def logs(job_id: str, request: Request):
+    def logs(job_id: str, request: Request, full: bool = False):
         get_job(request, job_id)
         path = manager(request).root / job_id / 'log.txt'
         if not path.is_file():
             return {'text': '', 'truncated': False}
         with path.open('rb') as file:
             size = path.stat().st_size
-            file.seek(max(0, size - 131072))
+            file.seek(0 if full else max(0, size - 131072))
             text = file.read().decode('utf-8', errors='replace')
-        return {'text': text, 'truncated': size > 131072}
+        return {'text': text, 'truncated': not full and size > 131072}
 
     def job_references(request: Request, job_id: str):
         job = get_job(request, job_id)

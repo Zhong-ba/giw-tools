@@ -5,6 +5,7 @@ import urllib.request
 from PIL import Image, ImageDraw
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.files import write_file, write_file_pages
 from utils.misc import dict_to_table
 
@@ -49,7 +50,7 @@ def qte_file_name(center, length):
 def missing_wiki_files(names, api = 'https://genshin-impact.fandom.com/api.php', timeout = 30):
     '''The file names among names that have no File: page on the wiki.'''
     names, missing = list(names), set()
-    for start in range(0, len(names), 50):
+    for start in report.track(list(range(0, len(names), 50)), 'Checking wiki images in batches'):
         query = urllib.parse.urlencode({'action': 'query', 'format': 'json',
                                         'titles': '|'.join(f'File:{name}' for name in names[start:start + 50])})
         # Fandom rejects requests without a browser-like User-Agent.
@@ -61,6 +62,7 @@ def missing_wiki_files(names, api = 'https://genshin-impact.fandom.com/api.php',
 
 
 def parse_cooking_qte():
+    report.stage('Building Manual Cooking data')
     out = cooking_qte_data()
     file_write_path = f'{CONFIG.OUTPUT_PATH}/Manual_Cooking_data.lua'
     
@@ -130,9 +132,9 @@ def cooking_qte_image_gen(center, length):
     filename = qte_file_name(center, length)
     try:
         final_image.save(f'{CONFIG.OUTPUT_PATH}/Cooking_QTE/{filename}')
-        print(f'Successfully saved {filename}')
+        report.info(f'Saved {filename}')
     except Exception as e:
-        print(f'Error saving {filename}: {e}')
+        report.warning(f'Could not save {filename}: {e}')
 
 
 def cooking_qte_2(only_missing = False):
@@ -142,7 +144,7 @@ def cooking_qte_2(only_missing = False):
     if only_missing:
         absent = set(missing_wiki_files(qte_file_name(*combo) for combo in combos))
         combos = [combo for combo in combos if qte_file_name(*combo) in absent]
-    for center, length in combos:
+    for center, length in report.track(combos, 'Drawing cooking dial images'):
         cooking_qte_image_gen(center, length)
     names = [qte_file_name(*combo) for combo in combos]
     write_file_pages(f'{CONFIG.OUTPUT_PATH}/Cooking_QTE', dict.fromkeys(names, COOKING_FILE_PAGE))

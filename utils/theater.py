@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.pageinfo import pageinfo
 from utils.periods import TIME_FORMAT, seasons as _seasons, times as _times, wiki_version
 
@@ -297,9 +298,10 @@ def theater_page(start=None, version=''):
 
 def write_theater_page(start=None, version='', directory=None):
     '''Writes the season's page to directory (default OutputPath) and returns its path.'''
+    report.stage(f'Building Imaginarium Theater season: {start or "latest"}')
     title, text = theater_page(start, version)
     path = Path(directory or CONFIG.OUTPUT_PATH) / f'{title.replace("/", " ")}.wikitext'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding='utf-8')
-    print(f'Wrote {title} to {path}.', flush=True)
+    report.info(f'Wrote {title} to {path.name}.')
     return path

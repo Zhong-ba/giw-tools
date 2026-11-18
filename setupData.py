@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+import toolLog as report
 
 from dataSource import (
     LATEST, ROOT, SOURCES, binoutput_path, cache_path, config_path, data_root, excel_dataset_path,
@@ -19,20 +20,10 @@ from dataSource import (
 
 
 SCHEMA = ROOT / 'leo' / 'dataSchema.json'
-# BinOutput files the tools read: monster configs (enemy tool), character reference files (Character Kit,
-# whose Advanced Properties also need the talent configs that link attacks to talent scaling rows) and the
-# Spiral Abyss chambers' enemy previews.
-BINOUTPUT_PATHS = [
-    '/BinOutput/Monster/',
-    '/BinOutput/Avatar/ConfigAvatar_*.json',
-    '/BinOutput/Ability/Temp/AvatarAbilities/',
-    '/BinOutput/Ability/Temp/AvatarAniEventAbilities/',
-    '/BinOutput/Gadget/ConfigGadget_SkillObj_*.json',
-    '/BinOutput/Talent/AvatarTalents/',
-    '/BinOutput/MonsterPreview/',
-]
+# The viewer browses the complete tree, including enemy abilities and shared gadgets.
+BINOUTPUT_PATHS = ['/BinOutput/']
 # Bump when BINOUTPUT_PATHS or BinOutput preparation changes so prepared snapshots are refreshed.
-BINOUTPUT_LAYOUT = 5
+BINOUTPUT_LAYOUT = 6
 # Scrambled BinOutput keys are recovered by matching values against this source's readable copy.
 READABLE_SOURCE = 'dimbreath'
 # Only the Excel aliases in SCHEMA affect preparation; they are fingerprinted separately.
@@ -52,7 +43,20 @@ def pipeline_version():
 
 
 def run(command, **kwargs):
-    return subprocess.run(command, check=True, **kwargs)
+    if (kwargs.get('stdout') is not None or not kwargs.get('text', True)
+            or set(kwargs) - {'cwd', 'env', 'text', 'stdout'}):
+        return subprocess.run(command, check=True, **kwargs)
+    options = dict(kwargs, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                   text=True, encoding='utf-8', errors='replace')
+    with subprocess.Popen(command, **options) as process:
+        if process.stdout is None:
+            raise RuntimeError('The setup command did not provide an output stream.')
+        for line in process.stdout:
+            report.info(line.rstrip('\r\n'))
+        code = process.wait()
+    if code:
+        raise subprocess.CalledProcessError(code, command)
+    return subprocess.CompletedProcess(command, code)
 
 
 def git(repository, *arguments, capture=False):
@@ -98,7 +102,7 @@ def check_fields(dataset):
     with SCHEMA.open(encoding='utf-8') as file:
         required = json.load(file)['required']
     warnings = []
-    for table, fields in required.items():
+    for table, fields in report.track(list(required.items()), 'Checking required dataset fields'):
         path = dataset / 'MappedExcelBinOutput_EN' / f'{table}.json'
         if not path.is_file():
             warnings.append(f'{table} is not in this build ({", ".join(fields)} unavailable).')
@@ -110,7 +114,7 @@ def check_fields(dataset):
         if missing:
             warnings.append(f'{table} has no {", ".join(missing)}.')
     for warning in warnings:
-        print(f'Warning: {warning} Tools using it may fail; add the new field name to {SCHEMA.name}.', flush=True)
+        report.warning(f'{warning} Tools using it may fail; add the new field name to {SCHEMA.name}.')
     return warnings
 
 
@@ -120,7 +124,7 @@ def check_monsters(directory, sample_size=400):
     files = sorted(directory.glob('*.json'))
     sample = files[::max(1, len(files) // sample_size)]
     readable = 0
-    for path in sample:
+    for path in report.track(sample, 'Checking monster config readability'):
         try:
             with path.open(encoding='utf-8') as file:
                 found = monster_property(json.load(file))
@@ -128,10 +132,10 @@ def check_monsters(directory, sample_size=400):
             continue
         if found and found.get('endureType') and (found.get('weight') or found.get('bonusRange')):
             readable += 1
-    print(f'Monster configs with weight and endure type: {readable} of {len(sample)} sampled.', flush=True)
+    report.info(f'Monster configs with weight and endure type: {readable} of {len(sample)} sampled.')
     if sample and readable < len(sample) * 0.8:
-        print(f'Warning: few monster configs are readable. Scrambled names may have changed; update '
-              f'monsterConfig in {SCHEMA.name}.', flush=True)
+        report.warning('Few monster configs are readable. Scrambled names may have changed; update '
+                       f'monsterConfig in {SCHEMA.name}.')
     return readable, len(sample)
 
 
@@ -142,10 +146,11 @@ def preprocess(config):
         path = Path(temporary) / 'scriptconfig.json'
         path.write_text(json.dumps(child_config), encoding='utf-8')
         environment = dict(os.environ, GENSHIN_TOOLS_CONFIG=str(path))
-        print('Merging TextMaps and cleaning English text...', flush=True)
+        report.stage('Merging TextMaps and cleaning English text')
         run([sys.executable, str(ROOT / 'textmapcleanup.py')], cwd=ROOT, env=environment)
-        print('Mapping English Excel tables...', flush=True)
+        report.stage('Mapping English Excel tables')
         run(['node', str(ROOT / 'leo' / 'ExcelMapEN.js')], cwd=ROOT, env=environment)
+    report.stage('Validating mapped Excel tables')
     validate_outputs(dataset)
     check_fields(dataset)
     return dataset
@@ -155,7 +160,7 @@ def update_repository(path, source, revision=LATEST):
     spec = SOURCES[source]
     repository = cache_path(path, source) / 'repository.git'
     if not repository.exists():
-        print(f'Downloading {spec["label"]}...', flush=True)
+        report.stage(f'Downloading {spec["label"]}')
         repository.parent.mkdir(parents=True, exist_ok=True)
         run([
             'git', 'clone', '--bare', '--depth=1', '--filter=blob:none',
@@ -172,11 +177,11 @@ def update_repository(path, source, revision=LATEST):
         known = subprocess.run(['git', '--git-dir', str(repository), 'cat-file', '-e', f'{revision}^{{commit}}'],
                                capture_output=True).returncode == 0
         if not known:
-            print(f'Downloading {spec["label"]} revision {revision[:8]}...', flush=True)
+            report.stage(f'Downloading {spec["label"]} revision {revision[:8]}')
             git(repository, 'fetch', '--depth=1', '--filter=blob:none', 'origin', revision)
         return repository, revision
     if reference is None:
-        print(f'Checking {spec["label"]} for updates...', flush=True)
+        report.stage(f'Checking {spec["label"]} for updates')
         git(repository, 'fetch', '--depth=1', '--filter=blob:none', 'origin', spec['branch'])
         reference = 'FETCH_HEAD'
     commit = git(repository, 'rev-parse', reference, capture=True)
@@ -294,7 +299,7 @@ def history_space(path, dates, before, minimum):
             return True
         if directory in protected:
             continue
-        print(f'Removing older dataset {directory.relative_to(root)} to make space.', flush=True)
+        report.info(f'Removing older dataset {directory.relative_to(root)} to make space.')
         repository = cache_path(path, source) / 'repository.git'
         git(repository, 'worktree', 'remove', '--force', directory)
     return shutil.disk_usage(root).free >= minimum
@@ -386,6 +391,7 @@ def is_prepared(directory, revision):
 
 
 def prepare_binoutput(repository, directory, revision):
+    report.stage(f'Preparing BinOutput revision {revision["commit"][:8]}')
     checkout(repository, directory, revision['commit'], BINOUTPUT_PATHS, cone=False)
     # A previous preparation may have rewritten the files.
     run(['git', '-C', str(directory), 'restore', '--source=HEAD', '--worktree', '--', 'BinOutput'])
@@ -404,17 +410,17 @@ def deobfuscate(path, repositories, directory, dataset):
     reference_revision = {'source': READABLE_SOURCE, 'commit': commit, 'layout': BINOUTPUT_LAYOUT}
     reference = binoutput_path(path, reference_revision)
     if not is_prepared(reference, reference_revision):
-        print(f'Downloading readable BinOutput from {SOURCES[READABLE_SOURCE]["label"]}...', flush=True)
+        report.stage(f'Downloading readable BinOutput from {SOURCES[READABLE_SOURCE]["label"]}')
         prepare_binoutput(repository, reference, reference_revision)
         write_json(reference / '.prepared.json', reference_revision)
-    print('Recovering scrambled BinOutput key names by matching values...', flush=True)
+    report.stage('Recovering scrambled BinOutput key names by matching values')
     result = binKeys.deobfuscate(reference / 'BinOutput', folder,
                                  dataset / 'MappedExcelBinOutput_EN' / 'MonsterExcelConfigData.json')
     total = result['translated'] + result['remaining']
     share = result['translated'] / total if total else 1
-    print(f'Recovered {len(result["keys"])} key names and {len(result["types"])} type names from {result["pairs"]} '
-          f'file pairs; {share:.0%} of scrambled keys are now readable. Fields the readable source does not '
-          'have keep their scrambled names.', flush=True)
+    report.info(f'Recovered {len(result["keys"])} key names and {len(result["types"])} type names from {result["pairs"]} '
+                f'file pairs; {share:.0%} of scrambled keys are now readable. Fields the readable source does not '
+                'have keep their scrambled names.')
     write_json(directory / '.keys.json', {
         'reference': reference_revision,
         'keys': result['keys'],
@@ -452,7 +458,7 @@ def prepare_remote(config, path, keep_versions=None, keep_history=False):
                 raise OSError('Not enough disk space to prepare the current dataset while preserving the reserve.')
         for role, title in (('excel', 'Excel and TextMap'), ('binoutput', 'BinOutput')):
             pinned = '' if revisions[role] == LATEST else f' (pinned to {revisions[role][:8]})'
-            print(f'{title} source: {SOURCES[selected[role]]["label"]}{pinned}', flush=True)
+            report.info(f'{title} source: {SOURCES[selected[role]]["label"]}{pinned}')
         wanted = dict.fromkeys((selected[role], revisions[role]) for role in selected)
         repositories = {key: update_repository(path, *key) for key in wanted}
 
@@ -463,7 +469,7 @@ def prepare_remote(config, path, keep_versions=None, keep_history=False):
         binoutput_revision = {'source': selected['binoutput'], 'commit': commit, 'layout': BINOUTPUT_LAYOUT}
         binoutput = binoutput_path(path, binoutput_revision)
         if is_prepared(binoutput, binoutput_revision):
-            print(f'Using already-prepared BinOutput revision {commit}.', flush=True)
+            report.info(f'Using already-prepared BinOutput revision {commit}.')
         else:
             prepare_binoutput(repository, binoutput, binoutput_revision)
             deobfuscate(path, repositories, binoutput, dataset)
@@ -476,7 +482,7 @@ def prepare_remote(config, path, keep_versions=None, keep_history=False):
             kept = [excel_revision]
             hint = 'Pin ExcelRevision to a release build, or run setup without --keep-versions.'
             for older in earlier_versions(selected['excel'], excel_revision['commit'], keep_versions - 1, hint):
-                print(f'Preparing the previous version {older["title"]} ({older["commit"][:8]})...', flush=True)
+                report.stage(f'Preparing the previous version {older["title"]} ({older["commit"][:8]})')
                 repository, commit = update_repository(path, selected['excel'], older['commit'])
                 kept.append(prepare_excel(config, path, selected['excel'], repository, commit)[1])
             prune(path, kept, binoutput_revision)
@@ -493,8 +499,9 @@ def prepare_excel(config, path, source, repository, commit):
     dataset = excel_dataset_path(path, excel_revision)
     if is_prepared(dataset, excel_revision):
         validate_outputs(dataset)
-        print(f'Using already-prepared Excel revision {commit}.', flush=True)
+        report.info(f'Using already-prepared Excel revision {commit}.')
     else:
+        report.stage(f'Preparing Excel revision {commit[:8]}')
         checkout(repository, dataset, commit, ['ExcelBinOutput', 'TextMap'])
         # A failed attempt may have already rewritten some tracked TextMaps.
         run(['git', '-C', str(dataset), 'restore', '--source=HEAD', '--worktree', '--', 'TextMap'])
@@ -521,15 +528,14 @@ def prepare_history(config, path, selected, history, dates, repositories, datase
         if is_prepared(directory, metadata):
             continue
         if not history_space(path, dates, date, 4 * 1024 ** 3):
-            print('Stopped historical preparation: no older removable datasets can provide enough staging space.',
-                  flush=True)
+            report.warning('Stopped historical preparation: no older removable datasets can provide enough staging space.')
             return
-        print(f'Preparing {role} revision {commit[:8]}: {revision["title"]}', flush=True)
+        report.stage(f'Preparing {role} revision {commit[:8]}: {revision["title"]}')
         repository, commit = update_repository(path, source, commit)
         required = ('ExcelBinOutput', 'TextMap') if role == 'excel' else ('BinOutput/Monster',)
         existing = set(git(repository, 'ls-tree', '--name-only', commit, '--', *required, capture=True).splitlines())
         if not set(required).issubset(existing):
-            print(f'Skipping {commit[:8]}: it does not contain the required {role} data.', flush=True)
+            report.warning(f'Skipping {commit[:8]}: it does not contain the required {role} data.')
             continue
         if role == 'excel':
             prepare_excel(config, path, source, repository, commit)
@@ -554,11 +560,11 @@ def prune(path, excel_revisions, binoutput_revision):
             for directory in sorted((cache / folder).glob('*')):
                 if directory.is_dir() and directory not in keep:
                     freed += sum(item.stat().st_size for item in directory.rglob('*') if item.is_file())
-                    print(f'Removing {directory.relative_to(data_root(path))}', flush=True)
+                    report.info(f'Removing {directory.relative_to(data_root(path))}')
                     shutil.rmtree(directory)
         if (cache / 'repository.git').is_dir():
             git(cache / 'repository.git', 'worktree', 'prune')
-    print(f'Freed {freed / 1024 ** 3:.2f} GB.', flush=True)
+    report.info(f'Freed {freed / 1024 ** 3:.2f} GB.')
 
 
 def prepare(path=None, keep_versions=None, keep_history=False, reserve_gb=5):
@@ -582,7 +588,7 @@ def prepare(path=None, keep_versions=None, keep_history=False, reserve_gb=5):
         if keep_versions is not None or keep_history:
             raise ValueError('Revision retention needs downloaded data (DataSource "remote").')
         dataset = preprocess(config)
-    print(f'Dataset ready: {dataset}', flush=True)
+    report.info(f'Dataset ready: {dataset}')
     return dataset
 
 

@@ -2,6 +2,7 @@ import json
 import re
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.files import write_file
 
 
@@ -50,6 +51,7 @@ def bounty_blocks(bundle_ids = None):
     '''Region name -> {{Bounty}} blocks of the given bundles (all when None), in table order.'''
     from utils.fishing import city_names
 
+    report.stage('Loading bounty and region data')
     bundles = _load('HuntingV2MonsterBundleExcelConfigData')
     located = bundle_regions(_load('HuntingV2RegionExcelConfigData'))
     monsters = {item['Id']: item for item in _load('MonsterExcelConfigData')}
@@ -63,7 +65,7 @@ def bounty_blocks(bundle_ids = None):
         bundles = [bundle for bundle in bundles if bundle['Id'] in wanted]
 
     sections = {}
-    for bundle in bundles:
+    for bundle in report.track(bundles, 'Generating bounties'):
         bundle_id = bundle['Id']
         enemy = monsters.get(bundle['MonsterId'], {}).get('DescribeName') or ''
         region = located.get(bundle_id, {})
@@ -83,6 +85,8 @@ def bounty_blocks(bundle_ids = None):
 |desc       = {lore.replace(chr(10), '<br>')}
 |notes      = 
 }}}}''')
+    report.info(f'Generated {sum(map(len, sections.values()))} bounty entries across '
+                f'{len(sections)} region{"" if len(sections) == 1 else "s"}.')
     return sections
 
 

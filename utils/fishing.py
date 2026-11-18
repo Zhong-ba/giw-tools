@@ -6,6 +6,7 @@ import os
 import re
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.files import write_file
 from utils.pageinfo import pageinfo
 
@@ -86,6 +87,7 @@ def _count_range(low, high):
 
 def fishing_point_pages(pool_ids):
     '''{wiki title: page wikitext} for the given pool IDs.'''
+    report.stage('Loading fishing point data')
     pools = {pool['Id']: pool for pool in _load('FishPoolExcelConfigData')}
     titles = fishing_points(pools.values())
     stocks = {stock['Id']: stock for stock in _load('FishStockExcelConfigData')}
@@ -93,7 +95,7 @@ def fishing_point_pages(pool_ids):
     cities, areas = city_names(), _area_lookup()
 
     pages = {}
-    for pool_id in pool_ids:
+    for pool_id in report.track(pool_ids, 'Generating fishing points'):
         pool = pools.get(pool_id)
         if pool is None:
             raise ValueError(f'Fish pool {pool_id} does not exist.')
@@ -129,7 +131,7 @@ def write_fishing_points(pool_ids, directory = None):
     directory = directory or f'{CONFIG.OUTPUT_PATH}/Fishing Points'
     os.makedirs(directory, exist_ok = True)
     pages = fishing_point_pages(pool_ids)
-    for title, text in pages.items():
+    for title, text in report.track(list(pages.items()), 'Writing fishing point pages'):
         name = UNSAFE_FILENAME.sub('', title.split('/', 1)[1]).strip()
         write_file(f'{directory}/{name}.wikitext', text + '\n', overwrite = True)
     return len(pages)
@@ -140,13 +142,14 @@ def fish_weights(pools = None, stocks = None, fish = None):
 
     Only stocks of real fishing points count (event and quest stocks use other weights); a fish weighted
     differently between points takes its most common weight.'''
+    report.stage('Loading fish spawn data')
     pools = pools if pools is not None else _load('FishPoolExcelConfigData')
     stocks = {stock['Id']: stock for stock in (stocks if stocks is not None else _load('FishStockExcelConfigData'))}
     fish = {item['Id']: item for item in (fish if fish is not None else _load('FishExcelConfigData'))}
     real = fishing_points(pools)
 
     weights = {}
-    for pool in sorted(pools, key = lambda pool: pool['Id']):
+    for pool in report.track(sorted(pools, key = lambda pool: pool['Id']), 'Calculating fish spawn weights'):
         if pool['Id'] not in real:
             continue
         for stock_id in pool.get('StockList', []):
@@ -180,6 +183,7 @@ return {{
 def write_fish_weights(directory = None):
     directory = directory or CONFIG.OUTPUT_PATH
     weights = fish_weights()
+    report.stage('Writing fish spawn-weight module')
     write_file(f'{directory}/Fishing_Point_Fish_List_data.lua', fish_weights_lua(weights), overwrite = True)
     return len(weights)
 
@@ -200,4 +204,4 @@ def parse_fishing_points(selection, old_pools = None):
     else:
         pool_ids = [int(value) for value in selection.split(',') if value.strip()]
     count = write_fishing_points(pool_ids)
-    print(f'Generated {count} fishing point page{"" if count == 1 else "s"}.')
+    report.info(f'Generated {count} fishing point page{"" if count == 1 else "s"}.')

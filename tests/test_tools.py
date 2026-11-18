@@ -1,4 +1,5 @@
 ﻿import contextlib
+from copy import deepcopy
 import importlib
 import io
 import json
@@ -16,6 +17,101 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 LANGS = ['CHS', 'CHT', 'DE', 'EN', 'ES', 'FR', 'ID', 'JP', 'KR', 'PT', 'RU', 'TH', 'VI', 'TR', 'IT']
+
+
+class ReportingTests(unittest.TestCase):
+    def test_file_confirmations_are_debug_and_missing_files_are_counted(self):
+        import toolLog as report
+        from utils.files import copy_file, write_file
+
+        self.addCleanup(report.configure)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            snapshot = root / 'progress.json'
+            log = io.StringIO()
+            report.configure(log, snapshot)
+            with self.assertLogs(report.logger, level='DEBUG') as captured:
+                write_file(str(root / 'page.txt'), 'first')
+                write_file(str(root / 'page.txt'), 'second')
+            self.assertEqual([record.levelname for record in captured.records], ['DEBUG', 'DEBUG'])
+            self.assertEqual((root / 'page.txt').read_text(), 'first')
+            self.assertEqual((root / 'page_2.txt').read_text(), 'second')
+            self.assertEqual(log.getvalue(), '')
+            self.assertIsNone(copy_file(str(root / 'missing.png'), str(root / 'copy.png')))
+            self.assertIn('WARNING Cannot copy missing file:', log.getvalue())
+            self.assertEqual(json.loads(snapshot.read_text())['warnings'], 1)
+
+    def test_setup_subprocess_diagnostics_and_captured_payloads(self):
+        import setupData
+        import toolLog as report
+
+        self.addCleanup(report.configure)
+        log = io.StringIO()
+        report.configure(log)
+        command = [sys.executable, '-u', '-c', "print('Child diagnostic', flush=True); raise RuntimeError('Child failure')"]
+        with self.assertRaises(subprocess.CalledProcessError) as failed:
+            setupData.run(command)
+        self.assertEqual((failed.exception.returncode, failed.exception.cmd), (1, command))
+        self.assertIn('INFO    Child diagnostic', log.getvalue())
+        self.assertIn('RuntimeError: Child failure', log.getvalue())
+        self.assertEqual(log.getvalue().count('RuntimeError: Child failure'), 1)
+        result = setupData.run([sys.executable, '-c', "print('captured payload')"], stdout=subprocess.PIPE, text=True)
+        self.assertEqual(result.stdout.strip(), 'captured payload')
+        self.assertNotIn('captured payload', log.getvalue())
+
+    def test_worker_progress_capture_tracebacks_and_per_job_reset(self):
+        import toolLog as report
+        from webui.worker import serve
+        from webui.jobs import now
+
+        self.addCleanup(report.configure)
+        self.addCleanup(os.chdir, Path.cwd())
+        with tempfile.TemporaryDirectory() as temporary:
+            directories = [Path(temporary) / name for name in ('first', 'second')]
+            for directory in directories:
+                directory.mkdir()
+                (directory / 'job.json').write_text(json.dumps({'started_at': now()}), encoding='utf-8')
+            replies = []
+            messages = iter([*map(str, directories), None])
+            connection = types.SimpleNamespace(recv=lambda: next(messages), send=replies.append)
+
+            def execute(directory):
+                if directory == directories[0]:
+                    report.stage('Generating pages', 3)
+                    report.advance(1)
+                    report.warning('Optional image unavailable.')
+                    print('Legacy partial line', end='')
+                else:
+                    report.stage('Reading data')
+                    raise ValueError('Broken fixture.')
+
+            with patch('webui.worker.run_tool', side_effect=execute):
+                serve(connection)
+            first = (directories[0] / 'log.txt').read_text(encoding='utf-8')
+            second = (directories[1] / 'log.txt').read_text(encoding='utf-8')
+            progress = [json.loads((directory / 'progress.json').read_text()) for directory in directories]
+            self.assertEqual((progress[0]['completed'], progress[0]['total'], progress[0]['warnings']), (1, 3, 1))
+            self.assertEqual((progress[1]['total'], progress[1]['warnings']), (None, 0))
+            self.assertIn('WARNING Optional image unavailable.', first)
+            self.assertIn('INFO    Legacy partial line', first)
+            self.assertIn('ERROR   Traceback (most recent call last):', second)
+            self.assertIn('ValueError: Broken fixture.', second)
+            self.assertNotIn('Optional image', second)
+            self.assertNotIn('completed successfully', first)
+            self.assertEqual(replies, [None, 'ValueError: Broken fixture.'])
+
+    def test_nested_stage_counts_restore_batch_progress(self):
+        import toolLog as report
+
+        self.addCleanup(report.configure)
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = Path(temporary) / 'progress.json'
+            report.configure(io.StringIO(), snapshot)
+            for _ in report.track([1, 2], 'Rotations'):
+                report.stage('Loading rotation')
+                self.assertIsNone(json.loads(snapshot.read_text())['total'])
+            progress = json.loads(snapshot.read_text())
+            self.assertEqual((progress['stage'], progress['completed'], progress['total']), ('Rotations', 2, 2))
 
 
 class ToolTests(unittest.TestCase):
@@ -54,6 +150,483 @@ class ToolTests(unittest.TestCase):
 
     def write_json(self, path, value):
         path.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
+
+    def test_setup_field_and_readability_warnings_are_counted(self):
+        import setupData
+        import toolLog as report
+
+        self.addCleanup(report.configure)
+        snapshot = self.work / 'progress.json'
+        log = io.StringIO()
+        report.configure(log, snapshot)
+        schema = self.work / 'schema.json'
+        self.write_json(schema, {'required': {'ExampleExcelConfigData': ['Id']}})
+        self.write_json(self.excel / 'ExampleExcelConfigData.json', [{}])
+        self.write_json(self.work / 'BinOutput' / 'Monster' / 'Example.json', {})
+        with patch.object(setupData, 'SCHEMA', schema):
+            self.assertEqual(setupData.check_fields(self.work), ['ExampleExcelConfigData has no Id.'])
+            self.assertEqual(setupData.check_monsters(self.work / 'BinOutput' / 'Monster'), (0, 1))
+        self.assertEqual(json.loads(snapshot.read_text())['warnings'], 2)
+        self.assertIn('WARNING ExampleExcelConfigData has no Id.', log.getvalue())
+        self.assertIn('WARNING Few monster configs are readable.', log.getvalue())
+        self.assertNotIn('Warning:', log.getvalue())
+
+    def test_scaling_diagnostics_stream_before_process_exit(self):
+        import talentScaling
+
+        for name, rows in {
+            'AvatarExcelConfigData': [{'Id': 1, 'SkillDepotId': 10}],
+            'AvatarSkillDepotExcelConfigData': [{'Id': 10, 'Skills': [11], 'EnergySkill': 12}],
+            'AvatarSkillExcelConfigData': [{'Id': 11, 'ProudSkillGroupId': 21}, {'Id': 12, 'ProudSkillGroupId': 22}],
+            'ProudSkillExcelConfigData': [{'ProudSkillGroupId': 21}, {'ProudSkillGroupId': 22}],
+        }.items():
+            self.write_json(self.excel / f'{name}.json', rows)
+        waited = []
+
+        def lines():
+            yield 'First diagnostic\n'
+            self.assertIn('First diagnostic', self.stdout.getvalue())
+            self.assertEqual(waited, [])
+            yield 'Second diagnostic\n'
+
+        def wait():
+            self.assertIn('Second diagnostic', self.stdout.getvalue())
+            waited.append(True)
+            return 0
+
+        process = types.SimpleNamespace(stdout=lines(), wait=wait)
+        with patch.object(talentScaling.shutil, 'which', return_value='node'), \
+                patch.object(talentScaling.subprocess, 'Popen', return_value=contextlib.nullcontext(process)), \
+                patch.object(talentScaling, 'TALENT_SECTION') as sections:
+            sections.findall.return_value = [('Normal', '{{Talent Scaling}}'), ('Burst', '{{Talent Scaling}}')]
+            self.assertEqual(len(talentScaling.talent_scaling(1)), 2)
+        self.assertEqual(waited, [True])
+
+    def particle_report(self, modifiers, specials=None, extra=None):
+        from particleGeneration import analyze_files
+
+        file = self.work / 'abilities.json'
+        ability = {'abilityName': 'Avatar_Tester_Skill', 'abilitySpecials': specials or {}, 'modifiers': modifiers}
+        ability.update(extra or {})
+        self.write_json(file, [{'Default': ability}])
+        return analyze_files([file])
+
+    def test_particle_generation_counts_and_trigger_evidence(self):
+        report = self.particle_report({
+            'Drop': {'duration': 7, 'stacking': 'Unique', 'onAdded': [
+                {'$type': 'GenerateElemBall', 'configID': 2019, 'baseEnergy': 6, 'ratio': 'Ratio'},
+                {'$type': 'Randomed', 'chance': 0.6700000166893005, 'successActions': [
+                    {'$type': 'GenerateElemBall', 'configID': 2019, 'baseEnergy': 3, 'ratio': 'Ratio'},
+                ]},
+            ]},
+            'Handler': {'onAttackLanded': [
+                {'$type': 'Predicated', 'targetPredicates': [
+                    {'$type': 'ByAttackTags', 'attackTags': ['Elemental_Art']},
+                ], 'successActions': [{'$type': 'ApplyModifier', 'modifierName': 'Drop'}]},
+            ]},
+        }, {'Ratio': 1})
+        event, = report['events']
+        self.assertEqual(event['expected_particles'], 2.67)
+        self.assertEqual(event['guaranteed_particles'], 2)
+        self.assertEqual(event['element'], 'Dendro')
+        self.assertEqual(event['modifier_gate'], {'duration': 7, 'stacking': 'Unique'})
+        caller, = event['triggers']
+        self.assertEqual(caller['event'], 'onAttackLanded')
+        self.assertEqual(caller['conditions']['predicates'][0]['targetPredicates'][0]['attackTags'], ['Elemental_Art'])
+        self.assertTrue(all(action['path'].startswith('0/Default/modifiers/Drop/') for action in event['actions']))
+
+    def test_particle_generation_random_failure_and_predicate_branches(self):
+        def drop(energy):
+            return {'$type': 'GenerateElemBall', 'configID': 2022, 'baseEnergy': energy, 'ratio': 1}
+
+        report = self.particle_report({'Drop': {'onAdded': [
+            {'$type': 'Randomed', 'chance': 0.25, 'successActions': [drop(6)], 'failActions': [drop(3)]},
+            {'$type': 'Predicated', 'targetPredicates': [{'$type': 'ByTargetGlobalValue', 'key': 'State'}],
+             'successActions': [drop(9)], 'failActions': [drop(12)]},
+        ]}})
+        self.assertEqual([event['expected_particles'] for event in report['events']], [1.25, 3, 4])
+        self.assertEqual([event['conditions']['branches'] for event in report['events']], [[], ['successActions'], ['failActions']])
+
+    def test_particle_generation_inline_state_guards_do_not_add_alternatives(self):
+        def drop(energy, **extra):
+            return {'$type': 'GenerateElemBall', 'configID': 2021, 'baseEnergy': energy, 'ratio': 1, **extra}
+
+        def predicate(value):
+            return [{'$type': 'ByTargetGlobalValue', 'key': 'ChargeStage', 'value': value}]
+
+        report = self.particle_report({'Drop': {'onAdded': [
+            drop(9, predicates=predicate(1)), drop(12, predicates=predicate(2)),
+            {'$type': 'Randomed', 'chance': 0.5, 'predicates': predicate(3), 'successActions': [drop(3)]},
+        ]}})
+        self.assertEqual([event['expected_particles'] for event in report['events']], [3, 4, 0.5])
+        self.assertEqual([event['conditions']['predicates'][0]['predicates'][0]['value'] for event in report['events']],
+                         [1, 2, 3])
+
+    def test_particle_generation_unresolved_values_do_not_look_like_zero(self):
+        drop = {'$type': 'GenerateElemBall', 'configID': 2021, 'baseEnergy': 3, 'ratio': 'Ratio'}
+        for action, extra in (
+                (drop, {'onAdded': [{'$type': 'SetOverrideMapValue', 'overrideMapKey': 'Ratio', 'value': 0}]}),
+                ({**drop, 'ratio': 'Missing'}, {}),
+                ({**drop, 'ratio': 1, 'configID': 9999}, {}),
+                ({'$type': 'UnknownGate', 'actions': [{**drop, 'ratio': 1}]}, {})):
+            with self.subTest(action=action, extra=extra):
+                event, = self.particle_report({'Drop': {'onAdded': [action]}}, {'Ratio': 1}, extra)['events']
+                self.assertIsNone(event['expected_particles'])
+                self.assertIsNone(event['guaranteed_particles'])
+                self.assertTrue(event['warnings'])
+
+    def test_particle_generation_cycle_and_absence_are_explicit(self):
+        report = self.particle_report({
+            'Drop': {'onAdded': [
+                {'$type': 'GenerateElemBall', 'configID': 2021, 'baseEnergy': 3, 'ratio': 1},
+                {'$type': 'ApplyModifier', 'modifierName': 'Drop'},
+            ]},
+        })
+        event, = report['events']
+        self.assertTrue(event['triggers'][0]['callers'][0]['cycle'])
+        report = self.particle_report({})
+        self.assertEqual(report['events'], [])
+        self.assertIn('does not establish zero', report['warnings'][-1])
+
+    def test_particle_generation_duplicate_definitions_stay_separate(self):
+        from particleGeneration import analyze_files
+
+        data = [{'Default': {'abilityName': 'Shared', 'onAdded': [
+            {'$type': 'GenerateElemBall', 'configID': 2017, 'baseEnergy': 12, 'ratio': 1},
+        ]}}]
+        files = [self.work / 'avatar.json', self.work / 'gadget.json']
+        for file in files:
+            self.write_json(file, data)
+        report = analyze_files(files)
+        self.assertEqual([event['expected_particles'] for event in report['events']], [4, 4])
+        self.assertTrue(all('Multiple definitions' in event['warnings'][0] for event in report['events']))
+
+    def test_particle_distribution_preserves_exclusive_and_nested_random_branches(self):
+        from particleGeneration import particle_distribution
+
+        def drop(count):
+            return {'$type': 'GenerateElemBall', 'configID': 2022, 'baseEnergy': 3 * count, 'ratio': 1}
+
+        report = self.particle_report({'Drop': {'onAdded': [
+            {'$type': 'Randomed', 'chance': 0.5, 'successActions': [drop(4)], 'failActions': [drop(5)]},
+        ]}})
+        self.assertEqual(particle_distribution(report['events']), {4: 0.5, 5: 0.5})
+        report = self.particle_report({'Drop': {'onAdded': [
+            {'$type': 'Randomed', 'chance': 0.25, 'successActions': [
+                drop(3), {'$type': 'Randomed', 'chance': 0.5, 'successActions': [drop(1)]},
+            ], 'failureActions': [
+                {'$type': 'Randomed', 'chance': 0.75, 'successActions': [drop(4)], 'failActions': [drop(3)]},
+            ]},
+        ]}})
+        self.assertEqual(particle_distribution(report['events']), {3: 0.3125, 4: 0.6875})
+        self.assertEqual(report['events'][0]['expected_particles'], 3.6875)
+
+    def test_particle_distribution_rejects_nonadjacent_or_unproven_outcomes(self):
+        from particleGeneration import particle_distribution
+
+        def random_drop(count):
+            return {'$type': 'Randomed', 'chance': 0.5, 'successActions': [
+                {'$type': 'GenerateElemBall', 'configID': 2022, 'baseEnergy': 3 * count, 'ratio': 1},
+            ]}
+
+        for actions in ([random_drop(2)], [random_drop(1), random_drop(1)]):
+            with self.subTest(actions=actions):
+                report = self.particle_report({'Drop': {'onAdded': actions}})
+                with self.assertRaisesRegex(ValueError, 'at most one extra'):
+                    particle_distribution(report['events'])
+        report = self.particle_report({'Drop': {'onAdded': [random_drop(1)]}})
+        report['events'][0]['actions'][0]['random_path'] = []
+        with self.assertRaisesRegex(ValueError, 'provenance'):
+            particle_distribution(report['events'])
+
+    def test_particle_generation_talent_added_ability_is_not_assumed_baseline(self):
+        from particleGeneration import particle_generation
+
+        ability_file = self.work / 'abilities.json'
+        talent_file = self.work / 'ConfigTalent_Tester.json'
+        self.write_json(ability_file, [{'Default': {'abilityName': 'OptionalAbility', 'onAdded': [
+            {'$type': 'GenerateElemBall', 'configID': 2022, 'baseEnergy': 6, 'ratio': 1},
+        ]}}])
+        self.write_json(talent_file, {'Tester_PermanentSkill_3': [
+            {'$type': 'AddAbility', 'abilityName': 'OptionalAbility'},
+        ]})
+        character = types.SimpleNamespace(files=[ability_file], talent_files=[talent_file], names={'Tester'},
+                                          avatar={'NameTextMapHash': 'Tester'}, depot={'Id': 101})
+        with patch('advancedProperties._character', return_value=character):
+            event, = particle_generation(10000001)['events']
+        self.assertEqual(event['expected_particles'], 2)
+        self.assertEqual(event['talent_additions'][0]['open_config'], 'Tester_PermanentSkill_3')
+        self.assertIn('baseline activation is not assumed', event['warnings'][-1])
+
+    def reviewed_particle_report(self):
+        guards = [
+            {'$type': 'ByAttackTags', 'target': 'Target', 'attackTags': ['Elemental_Art']},
+            {'$type': 'ByEntityTypes', 'target': 'Target', 'entityTypes': ['Monster'], 'isAuthority': -1},
+            {'$type': 'ByTargetGlobalValue', 'target': 'Target', 'key': '_ANIMAL_ENTITY_TYPE',
+             'compareType': 'NoneOrEqual'},
+        ]
+        def drop(energy):
+            return {'$type': 'GenerateElemBall', 'configID': 2021, 'baseEnergy': energy, 'ratio': 1,
+                    'born': {'$type': 'ConfigBornByTarget'}}
+
+        report = self.particle_report({
+            'Ball': {'duration': 0.3, 'stacking': 'Unique', 'onAdded': [drop(6)]},
+            'Ball_Extra': {'duration': 1, 'stacking': 'Unique', 'onAdded': [
+                {'$type': 'Randomed', 'chance': 0.67, 'successActions': [drop(3)]},
+            ]},
+            'Handler': {'onAttackLanded': [
+                {'$type': 'Predicated', 'target': 'Target', 'targetPredicates': guards, 'successActions': [
+                    {'$type': 'ApplyModifier', 'modifierName': 'Ball'},
+                    {'$type': 'ApplyModifier', 'modifierName': 'Ball_Extra'},
+                ]},
+            ]},
+        }, extra={'abilityName': 'Avatar_Qin_VortexSmash',
+                  'onAdded': [{'$type': 'AttachModifier', 'modifierName': 'Handler'}]})
+        report.update(character_id=10000003, skill_depot=301)
+        return report
+
+    def test_particle_skill_combines_only_co_triggered_components(self):
+        from particlePages import skill_particles
+
+        report = self.reviewed_particle_report()
+        output = skill_particles(report)
+        self.assertEqual(output['notes'], '* {{Talent Note|particles|2.67}}\n')
+        self.assertEqual(output['energy_cells'], 'colspan="2" | 2.67 || {{Anemo}} || Character')
+        report['events'][0]['actions'][0]['particles_on_success'] = 4
+        report['events'][0]['expected_particles'] = 4
+        self.assertEqual(skill_particles(report)['amounts'], [4.67])
+        report['events'][1]['triggers'][0]['action_list'] += '/another-event'
+        output = skill_particles(report)
+        self.assertEqual(output['status'], 'review_required')
+        self.assertIn('same triggering action list', output['reason'])
+
+    def test_traveler_particle_rules_are_depot_specific_and_conservative(self):
+        from particlePages import skill_particles
+
+        guards = [
+            {'$type': 'ByAttackTags', 'target': 'Target', 'attackTags': ['Elemental_Art']},
+            {'$type': 'ByEntityTypes', 'target': 'Target', 'entityTypes': ['Monster'], 'isAuthority': -1},
+            {'$type': 'ByTargetGlobalValue', 'target': 'Target', 'key': '_ANIMAL_ENTITY_TYPE',
+             'compareType': 'NoneOrEqual'},
+        ]
+        for depot, config, ability, modifier, amount in (
+                (503, 2018, 'Avatar_PlayerBoy_ElementalArt_Water_ElemBall', 'PlayerBoy_Water_Elemball_Drop', 4),
+                (505, 2022, 'Avatar_Player_ElementalArt_Ice', 'Player_Ice_ElementalArt_ElemBall_Initial', 3),
+                (508, 2019, 'Avatar_PlayerBoy_ElementalArt_Grass', 'PlayerBoy_Grass_ElemBall', 2)):
+            hit_guards = deepcopy(guards)
+            if depot == 503:
+                hit_guards.append({'$type': 'ByAttackType', 'target': 'Target', 'attackType': 'Default'})
+            hit = {'$type': 'Predicated', 'target': 'Target', 'value': -1, 'setTarget': depot == 505,
+                   'targetPredicates': hit_guards, 'successActions': [{'$type': 'ApplyModifier', 'modifierName': modifier}]}
+            if depot == 505:
+                hit['successActions'] = [{
+                    '$type': 'Predicated', 'doOffStage': True, 'target': 'Target', 'value': -1, 'setTarget': True,
+                    'targetPredicates': [{'$type': 'ByAttackTags', 'attackTags': ['Player_Ice_Icicle'], 'target': 'Target'}],
+                    'failActions': [{'$type': 'ApplyModifier', 'modifierName': modifier}],
+                }]
+            report = self.particle_report({
+                modifier: {'duration': 0.3, 'stacking': 'Unique', 'onAdded': [
+                    {'$type': 'GenerateElemBall', 'configID': config, 'baseEnergy': amount * 3, 'ratio': 1,
+                     'born': {'$type': 'ConfigBornBySelf' if depot == 503 else 'ConfigBornByTarget'}},
+                ]},
+                'Handler': {'stacking': 'Unique', 'onHittingOther' if depot == 503 else 'onAttackLanded': [hit]},
+            }, extra={'abilityName': ability, 'onAdded': [
+                {'$type': 'AttachModifier' if depot == 503 else 'ApplyModifier', 'modifierName': 'Handler'},
+            ]})
+            for character, selected in ((10000005, depot), (10000007, depot + 200)):
+                with self.subTest(character=character, depot=selected):
+                    report.update(character_id=character, skill_depot=selected)
+                    self.assertEqual(skill_particles(report)['amounts'], [amount])
+            report['skill_depot'] = depot
+            self.assertEqual(skill_particles(report)['status'], 'review_required')
+            report.update(character_id=10000005, skill_depot=depot)
+            changed = deepcopy(report)
+            changed['events'][0]['triggers'][0]['conditions']['branches'] = ['successActions', 'successActions']
+            self.assertEqual(skill_particles(changed)['status'], 'review_required')
+            report['events'].append(deepcopy(report['events'][0]))
+            self.assertEqual(skill_particles(report)['status'], 'review_required')
+
+    def test_particle_skill_rejects_unreviewed_states_and_distributions(self):
+        from particlePages import skill_particles
+
+        baseline = self.reviewed_particle_report()
+        variants = []
+        report = deepcopy(baseline)
+        report['events'][1]['actions'][0].update(particles_on_success=2, chance=0.5)
+        report['events'][1]['expected_particles'] = 1
+        variants.append(report)
+        report = deepcopy(baseline)
+        report['events'][0]['triggers'][0]['conditions']['predicates'][0]['targetPredicates'].append(
+            {'$type': 'ByTargetHPRatio', 'value': 0.5})
+        variants.append(report)
+        report = deepcopy(baseline)
+        report['events'][0]['talent_additions'] = [{'open_config': 'OptionalPassive'}]
+        variants.append(report)
+        report = deepcopy(baseline)
+        report['events'].append(deepcopy(report['events'][0]))
+        variants.append(report)
+        report = deepcopy(baseline)
+        report['events'][0]['modifier_gate']['duration'] = 10
+        variants.append(report)
+        variants.extend([baseline | {'character_id': 10000006}, baseline | {'skill_depot': 999}])
+        for report in variants:
+            with self.subTest(report=report):
+                output = skill_particles(report)
+                self.assertEqual(output['status'], 'review_required')
+                self.assertEqual(output['notes'], '')
+                self.assertIsNone(output['energy_cells'])
+        output = skill_particles(baseline | {'character_id': 10000034, 'events': []})
+        self.assertIn('does not prove zero', output['reason'])
+
+    def test_particle_skill_press_hold_and_per_projectile_output(self):
+        from particlePages import skill_particles
+
+        report = self.reviewed_particle_report()
+        report.update(character_id=10000032, skill_depot=3201)
+        first, second = report['events']
+        for event, modifier, comparison in ((first, 'Ball1', 'NoneOrEqual'), (second, 'Ball2', 'MoreThan')):
+            event.update(ability='Avatar_Bennett_ElementalArt_Handler', modifier=modifier, element='Pyro')
+            event['triggers'][0]['caller_gate'] = {'stacking': 'Unique'}
+            event['triggers'][0]['conditions']['predicates'].append({
+                '$type': 'ApplyModifier', 'predicates': [
+                    {'$type': 'ByTargetGlobalValue', 'target': 'Target',
+                     'key': '_ABILITY_Bennett_ElementalArt_Level', 'compareType': comparison},
+                ]})
+        first['actions'].append({**deepcopy(second['actions'][0]), 'chance': 0.25})
+        first['actions'][-1]['random_path'][0]['probability'] = 0.25
+        first['expected_particles'] = 2.25
+        second['actions'][0].update(particles_on_success=3, chance=1, random_path=[])
+        second.update(expected_particles=3, modifier_gate={'duration': 1.5, 'stacking': 'Unique'})
+        output = skill_particles(report)
+        self.assertEqual(output['notes'], '* {{Talent Note|particles|2.25|3}}\n')
+        self.assertEqual(output['energy_cells'], '2.25 || 3 || {{Pyro}} || Character')
+
+        report = self.reviewed_particle_report()
+        report.update(character_id=10000039, skill_depot=3901, events=report['events'][:1])
+        event, = report['events']
+        event.update(ability='Avatar_Diona_ElementalArt_Bullet_Material', element='Cryo',
+                     expected_particles=0.8, modifier_gate={'duration': 1, 'stacking': 'Unique'})
+        event['triggers'][0]['target'] = 'OriginOwner'
+        event['actions'][0].update(particles_on_success=1, chance=0.8,
+                                   born={'$type': 'ConfigBornByGlobalValue',
+                                         'positionKey': '_ABILITY_Diona_GenerateElemBall_CustomPos'},
+                                   random_path=[{'path': 'Diona/PawChance', 'probability': 0.8, 'branch': 'successActions'}])
+        output = skill_particles(report)
+        self.assertIn('{{Talent Note|particles|an Icy Paw|0.8}}', output['notes'])
+        self.assertIn("'''1.6''' on press and '''4''' on hold", output['notes'])
+        self.assertIn('colspan="2" | 0.8 <small>(Per Icy Paw)</small>', output['energy_cells'])
+
+    def test_particle_audit_keeps_future_variants_incomplete_depots_and_errors(self):
+        from particleAudit import audit_coverage
+
+        def avatar(identifier, name, depot, **extra):
+            return {'Id': identifier, 'NameTextMapHash': name, 'SkillDepotId': depot,
+                    'UseType': 'AVATAR_FORMAL', **extra}
+
+        avatars = [
+            avatar(10000003, 'Jean', 301),
+            avatar(10000151, 'Future', 15101),
+            avatar(10000005, 'Traveler', 501, CandSkillDepotIds=[501, 503, 503]),
+            avatar(10000007, 'Traveler', 701, CandSkillDepotIds=[703]),
+            avatar(10000903, 'Jean (Trial)', 301, FeatureTagGroupID=10000003),
+            avatar(10000001, 'Template', 101, UseType='AVATAR_ABANDON'),
+        ]
+        depots = [{'Id': identifier, 'Skills': [1, 2], 'EnergySkill': 5} for identifier in (301, 15101, 503, 703)]
+        depots.append({'Id': 501, 'Skills': []})
+        baseline = self.reviewed_particle_report()
+        calls = []
+
+        def analyze(identifier, depot):
+            calls.append((identifier, depot))
+            if depot == 703:
+                raise OSError('Missing ability file')
+            report = deepcopy(baseline)
+            report.update(character_id=identifier, skill_depot=depot)
+            if depot == 503:
+                report['events'] = []
+            if depot == 15101:
+                report['events'][0]['modifier_gate']['duration'] = 'RuntimeDuration'
+            return report
+
+        report = audit_coverage(avatars, depots, analyze)
+        self.assertEqual(report['status'], 'complete_with_errors')
+        summary = report['summary']
+        self.assertEqual((summary['avatars_audited'], summary['variants']), (4, 5))
+        self.assertEqual([summary[key] for key in ('supported', 'review_required', 'incomplete_depot', 'error')],
+                         [1, 2, 1, 1])
+        self.assertEqual(calls, [(10000151, 15101), (10000003, 301), (10000005, 503), (10000007, 703)])
+        self.assertEqual(len(report['excluded']), 2)
+        future = next(row for row in report['variants'] if row['character'] == 'Future')
+        self.assertIn('effective_cooldown', future['blockers'])
+        self.assertIn('co_trigger_components', future['pattern_candidates'])
+        self.assertEqual(future['status'], 'review_required')
+        self.assertEqual(report['primary_blockers']['no_generation_not_proven_zero'], 1)
+        failure = next(row for row in report['variants'] if row['status'] == 'error')
+        self.assertEqual(failure['reason'], 'Missing ability file')
+
+    def test_particle_audit_cli_and_web_share_output_and_expose_errors(self):
+        import particleAudit
+        from webui.tools import particle_audit
+
+        report = {'summary': {'error': 0, 'supported': 1}, 'primary_blockers': {}, 'variants': []}
+        with patch.object(particleAudit, 'audit_coverage', return_value=report):
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured), patch.object(sys, 'argv', ['particleGeneration.py', '--audit']):
+                runpy.run_path(str(ROOT / 'particleGeneration.py'), run_name='__main__')
+            self.assertEqual(json.loads(captured.getvalue()), report)
+            path = self.output / 'CLI Audit.json'
+            with patch.object(sys, 'argv', ['particleGeneration.py', '--audit', '--output', str(path)]):
+                runpy.run_path(str(ROOT / 'particleGeneration.py'), run_name='__main__')
+            self.assertEqual(json.loads(path.read_text(encoding='utf-8')), report)
+            particle_audit(self.output, {})
+            self.assertEqual(json.loads(self.read_output('Particle Coverage Audit.json')), report)
+            report['summary']['error'] = 1
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    patch.object(sys, 'argv', ['particleGeneration.py', '--audit']), self.assertRaises(SystemExit) as error:
+                runpy.run_path(str(ROOT / 'particleGeneration.py'), run_name='__main__')
+            self.assertEqual(error.exception.code, 1)
+            with self.assertRaisesRegex(RuntimeError, '1 extraction errors'):
+                particle_audit(self.output, {})
+            self.assertEqual(json.loads(self.read_output('Particle Coverage Audit.json'))['summary']['error'], 1)
+
+    def test_energy_pages_preserve_sort_and_replace_selected_rows(self):
+        from particlePages import ENERGY, energy_pages, skill_particles
+
+        text = ('Intro\n==Elemental Skills==\n{| class="fandom-table"\n! Character !! Particles\n'
+                '|-\n| {{Character|Traveler (Anemo)|20}}\n| 2 || 3.33\n'
+                '|-\n| {{Character|Amber|20}}\n| Keep Amber\n'
+                '|-\n| {{Character|Klee|20}}\n| Keep Klee\n|}\n'
+                '==Enemy HP Drops==\n{| class="fandom-table"\n| Keep enemy drops\n|}\n')
+        output = skill_particles(self.reviewed_particle_report())
+        pages, log = energy_pages('Jean', output, lambda titles: {ENERGY: text})
+        updated = pages[ENERGY]
+        self.assertLess(updated.index('Traveler (Anemo)'), updated.index('Amber'))
+        self.assertLess(updated.index('Amber'), updated.index('Character|Jean'))
+        self.assertLess(updated.index('Character|Jean'), updated.index('Character|Klee'))
+        self.assertIn('Enemy HP Drops==\n{| class="fandom-table"\n| Keep enemy drops\n|}', updated)
+        self.assertIn('added 1 row', log[0])
+        self.assertEqual(energy_pages('Jean', output, lambda titles: pages)[0], {})
+        old = updated.replace('colspan="2" | 2.67 || {{Anemo}} || Character',
+                              'rowspan="2" | 99 || old note\n|-\n| Old continuation')
+        pages, _ = energy_pages('Jean', output, lambda titles: {ENERGY: old}, update_existing=True)
+        self.assertEqual(pages[ENERGY], updated)
+        pages, log = energy_pages('Jean', output, lambda titles: {ENERGY: updated}, update_existing=True)
+        self.assertEqual(pages, {})
+        self.assertIn('unchanged', log[0])
+
+    def test_energy_pages_skip_uncertain_cases_without_network(self):
+        from particlePages import ENERGY, energy_pages, skill_particles
+
+        uncertain = skill_particles({'character_id': 10000034, 'events': []})
+        with patch('wikiVersion.page_texts') as fetch:
+            pages, log = energy_pages('Noelle', uncertain, update_existing=True)
+        fetch.assert_not_called()
+        self.assertEqual(pages, {})
+        self.assertIn('does not prove zero', log[0])
+        supported = skill_particles(self.reviewed_particle_report())
+        pages, log = energy_pages('Jean', supported, lambda titles: {})
+        self.assertEqual(pages, {})
+        self.assertIn(f'{ENERGY}: could not fetch', log[0])
 
     def test_config_without_local_asset_paths(self):
         self.write_json(self.work / 'scriptconfig.json', {'RepoPath': str(self.work), 'OutputPath': str(self.output)})
@@ -313,7 +886,6 @@ class ToolTests(unittest.TestCase):
             combat.assert_called_once_with(10000001, 101, 'Tester', update_existing=False)
             self.assertEqual(self.read_output('Tester/Data Pages/Hitlag Data.wikitext'),
                              '<%-- [PAGE_INFO]\n    pageTitle = #Hitlag/Data#\n[END_PAGE_INFO] --%>\n\nnew revision')
-            self.assertIn('Sword Characters: added 1 row', self.stdout.getvalue())
             combat.reset_mock()
             self.character_tool('--updateexisting')
             combat.assert_called_once_with(10000001, None, 'Tester', update_existing=True)
@@ -330,6 +902,221 @@ class ToolTests(unittest.TestCase):
             self.character_tool('--nodatapages', 'True')
             self.character_tool('--noap', 'True')
         combat.assert_not_called()
+
+    def test_character_kit_particle_notes_energy_and_web_parity(self):
+        import particleGeneration
+        import wikiVersion
+        from webui.tools import character_kit
+
+        report = self.reviewed_particle_report()
+        text = '==Elemental Skills==\n{| class="fandom-table"\n! Character !! Particles\n|}\n==Enemy HP Drops==\nKeep\n'
+        with patch.object(particleGeneration, 'particle_generation', return_value=report) as extract, \
+                patch.object(wikiVersion, 'page_texts', return_value={'Energy/Data': text}) as fetch:
+            self.character_tool('--noap', 'True', '--noscaling', 'True')
+            extract.assert_called_once_with(10000001, None)
+            self.assertIn('==Gameplay Notes==\n* {{Talent Note|particles|2.67}}\n\n;<big>Passive Effects</big>',
+                          self.read_output('Tester/Skills/E.wikitext'))
+            for name in ('NA', 'Q'):
+                self.assertNotIn('Talent Note|particles', self.read_output(f'Tester/Skills/{name}.wikitext'))
+            energy = self.read_output('Tester/Data Pages/Energy Data.wikitext')
+            self.assertIn('pageTitle = #Energy/Data#', energy)
+            self.assertIn('{{Character|Tester|20|nobr=1}}\n| colspan="2" | 2.67', energy)
+            review = json.loads(self.read_output('Tester/Particle Generation.json'))
+            self.assertEqual(review['output']['status'], 'supported')
+
+            extract.reset_mock()
+            with patch.object(sys, 'argv', []):
+                character_kit(self.output, {'character_id': 10000001, 'version': '1.0',
+                                          'attribute_scaling': False, 'advanced_properties': False})
+            extract.assert_called_once_with(10000001, None)
+            self.assertEqual(self.read_output('Tester/Data Pages/Energy Data.wikitext'), energy)
+
+            fetch.reset_mock()
+            self.character_tool('--noap', 'True', '--nodatapages', 'True')
+            fetch.assert_not_called()
+            self.assertIn('Talent Note|particles|2.67', self.read_output('Tester/Skills/E.wikitext'))
+
+            extract.return_value = {'character_id': 10000034, 'events': []}
+            self.character_tool('--noap', 'True')
+            fetch.assert_not_called()
+            self.assertFalse((self.output / 'Tester' / 'Data Pages' / 'Energy Data.wikitext').exists())
+            self.assertNotIn('Talent Note|particles', self.read_output('Tester/Skills/E.wikitext'))
+            self.assertIn('==Gameplay Notes==\n;<big>Passive Effects</big>', self.read_output('Tester/Skills/E.wikitext'))
+            self.assertEqual(json.loads(self.read_output('Tester/Particle Generation.json'))['output']['status'],
+                             'review_required')
+
+            extract.reset_mock()
+            with patch.object(sys, 'argv', []):
+                character_kit(self.output, {'character_id': 10000001, 'version': '1.0', 'particle_generation': False,
+                                          'attribute_scaling': False, 'advanced_properties': False})
+            extract.assert_not_called()
+            fetch.assert_not_called()
+            extract.side_effect = ValueError('incomplete data')
+            self.character_tool('--noap', 'True')
+            self.assertIn('Particle generation: error; incomplete data', self.stdout.getvalue())
+            self.assertEqual(json.loads(self.read_output('Tester/Particle Generation.json'))['output']['status'], 'error')
+
+    def traveler_fixture(self):
+        self.character_tool('--noap', 'True', '--noscaling', 'True', '--noparticles', '--nodatapages', 'True')
+        from travelerKits import ELEMENTS
+        avatars, depots, skills = [], [], []
+        for avatar_id, base in ((10000005, 500), (10000007, 700)):
+            candidates = list(range(base + 1, base + 9))
+            avatars.append({'Id': avatar_id, 'NameTextMapHash': 'Traveler',
+                            'SkillDepotId': base + 1, 'CandSkillDepotIds': candidates})
+            depots.append({'Id': base + 1, 'Skills': [1, 0]})
+            for index, (internal, element) in enumerate(ELEMENTS.items(), 2):
+                identifier = base + index
+                normal, skill, burst = (identifier * 10 + suffix for suffix in (1, 2, 5))
+                depots.append({'Id': identifier, 'Skills': [normal, skill], 'EnergySkill': burst,
+                               'Talents': list(range(101, 107)),
+                               'InherentProudSkillOpens': [{'ProudSkillGroupId': 11}, {'ProudSkillGroupId': 14},
+                                                          {'ProudSkillGroupId': 19} if element == 'Cryo' else {}]})
+                for skill_id, name in ((normal, f'Foreign {element}'), (skill, f'{element} Skill'), (burst, f'{element} Burst')):
+                    skills.append({'Id': skill_id, 'NameTextMapHash': name, 'DescTextMapHash': 'Deals damage.',
+                                   'CostElemType': internal, 'SkillIcon': 'Icon'})
+        self.write_json(self.excel / 'AvatarExcelConfigData.json', avatars)
+        self.write_json(self.excel / 'AvatarSkillDepotExcelConfigData.json', depots)
+        self.write_json(self.excel / 'AvatarSkillExcelConfigData.json', skills)
+        return avatars, depots, skills
+
+    def test_traveler_all_kits_pages_scaling_data_and_web_parity(self):
+        import advancedProperties
+        import particleGeneration
+        import particlePages
+        import talentScaling
+        import wikiVersion
+        from travelerKits import REGIONS, element_for
+        from webui.tools import character_kit
+
+        _, depots, skills = self.traveler_fixture()
+        versions = {f'Traveler ({element})': f'{index}.0' for index, element in enumerate(REGIONS, 1)}
+
+        def scaling(character, *levels, skill_depot):
+            depot = next(row for row in depots if row['Id'] == skill_depot)
+            return [(depot['Skills'][1], 'Skill', '{{Talent Scaling\n|levels=13\n}}')]
+
+        def properties(character, depot_id):
+            depot = next(row for row in depots if row['Id'] == depot_id)
+            return {depot['Skills'][0]: '{{Advanced Properties\n|title = ' + str(character) + '\n}}'}
+
+        def particles(character, depot_id):
+            depot = next(row for row in depots if row['Id'] == depot_id)
+            return {'character_id': character, 'skill_depot': depot_id, 'events': [],
+                    'element': element_for(depot, skills)}
+
+        def rendered(report):
+            return {'status': 'supported', 'reason': 'fixture', 'notes': '* {{Talent Note|particles|3}}\n',
+                    'energy_cells': f'3 || &mdash; || {{{{{report["element"]}}}}} || Character'}
+
+        text = '==Elemental Skills==\n{| class="fandom-table"\n! Character !! Particles\n|}\n==Enemy HP Drops==\nKeep\n'
+        with patch.object(wikiVersion, 'release_version', side_effect=versions.get) as release, \
+                patch.object(wikiVersion, 'page_texts', return_value={'Energy/Data': text}), \
+                patch.object(talentScaling, 'talent_scaling', side_effect=scaling) as scale, \
+                patch.object(advancedProperties, 'advanced_properties', side_effect=properties), \
+                patch.object(advancedProperties, 'talent_advanced_properties', return_value=({}, {})), \
+                patch('combatPages.combat_pages', return_value=({}, [])), \
+                patch.object(particleGeneration, 'particle_generation', side_effect=particles), \
+                patch.object(particlePages, 'skill_particles', side_effect=rendered):
+            with patch.object(sys, 'argv', ['parseCharKit.py', '--id', '10000005']):
+                runpy.run_path(str(ROOT / 'parseCharKit.py'))
+            self.assertEqual(release.call_count, 7)
+            self.assertEqual({call.kwargs['skill_depot'] for call in scale.call_args_list}, set(range(502, 509)))
+            for element, region in REGIONS.items():
+                folder = f'Traveler ({element})'
+                normal = self.read_output(f'{folder}/Skills/NA.wikitext')
+                skill = self.read_output(f'{folder}/Skills/E.wikitext')
+                self.assertIn(f'|character     = {folder}\n', skill)
+                self.assertIn(f'{{{{Talent Navbox|{folder}}}}}', skill)
+                self.assertIn(f'{{{{Change History|{versions[folder]}}}}}', skill)
+                self.assertIn(f'{{{{Talent Upgrade|{region}}}}}', skill)
+                self.assertIn('{{Past Memories}}', normal)
+                self.assertIn(';Aether\n{{Advanced Properties\n|title = 10000005', normal)
+                self.assertIn(';Lumine\n{{Advanced Properties\n|title = 10000007', normal)
+                self.assertNotIn('Talent VO', normal)
+                self.assertIn('Talent VO/Traveler|character=Lumine', skill)
+                self.assertIn('Talent Scaling', skill)
+                self.assertFalse((self.output / folder / 'Passives' / 'UP.wikitext').exists())
+                self.assertEqual((self.output / folder / 'Passives' / 'SP.wikitext').exists(), element == 'Cryo')
+            geo = self.read_output('Traveler (Geo)/Skills/NA.wikitext')
+            self.assertIn('{{Talent Upgrade|Mondstadt}}\n{{Talent Upgrade|Liyue}}', geo)
+            energy = self.read_output('Traveler/Data Pages/Energy Data.wikitext')
+            self.assertEqual(energy.count('{{Character|Traveler ('), 7)
+            self.assertIn('==Enemy HP Drops==\nKeep\n', energy)
+            self.assertEqual(len(list(self.output.glob('Traveler (*)/Particle Generation.json'))), 7)
+            before = {str(path.relative_to(self.output)): path.read_text(encoding='utf-8')
+                      for path in self.output.rglob('*.wikitext')}
+            with patch.object(sys, 'argv', []):
+                character_kit(self.output, {'character_id': 10000005, 'version': '1.0'})
+            self.assertEqual(before, {str(path.relative_to(self.output)): path.read_text(encoding='utf-8')
+                                      for path in self.output.rglob('*.wikitext')})
+
+    def test_traveler_depot_validation_single_kit_and_particle_cli(self):
+        import particleGeneration
+        from travelerKits import element_for, select_depots
+        from webui.tools import character_kit
+
+        avatars, depots, skills = self.traveler_fixture()
+        self.assertEqual(len(select_depots(avatars[0], depots, skills)), 7)
+        for selected in (501, 702, 101, 999):
+            with self.subTest(depot=selected), self.assertRaises(ValueError):
+                select_depots(avatars[0], depots, skills, selected)
+        with patch.object(sys, 'argv', []):
+            character_kit(self.output, {'character_id': 10000007, 'version': '7.0', 'skill_depot': 708,
+                                       'attribute_scaling': False, 'advanced_properties': False,
+                                       'particle_generation': False, 'data_pages': False})
+        self.assertEqual([path.name for path in self.output.glob('Traveler (*)')], ['Traveler (Cryo)'])
+        self.assertIn('{{Change History|7.0}}', self.read_output('Traveler (Cryo)/Skills/E.wikitext'))
+        self.assertNotIn('{{Past Memories}}', self.read_output('Traveler (Cryo)/Skills/NA.wikitext'))
+        with patch.object(particleGeneration, 'particle_generation',
+                          side_effect=lambda character, depot: {'character_id': character, 'skill_depot': depot,
+                              'element': element_for(next(row for row in depots if row['Id'] == depot), skills)}):
+            target = self.work / 'particles.json'
+            with patch.object(sys, 'argv', ['particleGeneration.py', '--id', '10000005', '10000007',
+                                            '--output', str(target)]):
+                particleGeneration.main()
+            reports = json.loads(target.read_text(encoding='utf-8'))
+            self.assertEqual(len(reports), 14)
+            self.assertEqual({report['element'] for report in reports}, set(element_for(d, skills)
+                             for d in select_depots(avatars[0], depots, skills)))
+
+    def test_traveler_shared_normal_attacks_keep_genders_separate(self):
+        from advancedProperties import _character, advanced_properties
+
+        avatars, depots, skills = self.traveler_fixture()
+        for avatar, name in zip(avatars, ('PlayerBoy', 'PlayerGirl')):
+            avatar['IconName'] = f'UI_AvatarIcon_{name}'
+        for skill in skills:
+            skill['ProudSkillGroupId'] = 11 if skill['Id'] % 10 == 1 else skill['Id']
+        self.write_json(self.excel / 'AvatarExcelConfigData.json', avatars)
+        self.write_json(self.excel / 'AvatarSkillExcelConfigData.json', skills)
+        self.write_json(self.excel / 'ProudSkillExcelConfigData.json', [{
+            'ProudSkillGroupId': 11, 'Level': 1, 'OpenConfig': 'Player_Common_SkillUpgrade_1',
+            'ParamDescList': ['1-Hit DMG|{param1:F1P}'],
+        }])
+        self.write_json(self.excel / 'AttackAttenuationExcelConfigData.json', [])
+        bin_path = self.work / 'BinOutput'
+        talent = bin_path / 'Talent' / 'AvatarTalents'
+        ability = bin_path / 'Ability' / 'Temp' / 'AvatarAbilities'
+        talent.mkdir(parents=True)
+        ability.mkdir(parents=True)
+        self.write_json(talent / 'ConfigTalent_Player_Common.json', {
+            'Player_Common_SkillUpgrade_1': [{'$type': 'ModifyAbility', 'paramSpecial': 'NormalHit', 'paramDelta': '%1'}],
+        })
+        self.write_json(ability / 'ConfigAbility_Avatar_Player_Common.json', [
+            {'abilityName': f'Avatar_{name}_NormalAttack_DamageHandler', 'actions': [
+                {'attackInfo': {'attackTag': 'NormalAttack_01',
+                                'attackProperty': {'damagePercentage': 'NormalHit', 'enBreak': poise}}}]}
+            for name, poise in (('PlayerBoy', 41.4), ('PlayerGirl', 40.5))
+        ])
+        for avatar, depot_id, poise in ((10000005, 502, '41.4'), (10000007, 702, '40.5')):
+            context = _character(avatar, depot_id)
+            self.assertIn(ability / 'ConfigAbility_Avatar_Player_Common.json', context.files)
+            normal = advanced_properties(avatar, depot_id)[depot_id * 10 + 1]
+            self.assertEqual(normal.count('|title'), 1)
+            self.assertIn(f'|poise   = {poise}', normal)
+        with self.assertRaisesRegex(ValueError, 'does not belong'):
+            _character(10000005, 702)
 
     def test_combat_data_pages_insert_rows(self):
         import combatPages as cp
@@ -388,6 +1175,7 @@ class ToolTests(unittest.TestCase):
                       pages[cp.HITLAG])
         self.assertNotIn(cp.TARGETING, pages)
         self.assertIn('Targeting/Data > Sword Characters: already listed', log)
+        self.assertIn('Targeting/Data > Sword Characters: already listed', self.stdout.getvalue())
         self.assertEqual(cp.update_pages('Tester', data, pages | {cp.TARGETING: texts[cp.TARGETING]})[0], {})
         self.assertEqual(cp.sequence_text([1, 0, 1, 0]), "'''''1 0''''' as the repetend")
 
@@ -1356,6 +2144,8 @@ class ToolTests(unittest.TestCase):
             gura_maps, {
                 'ExcelBinOutput/HyperLinkNameExcelConifgData.json': [{'ID': 7, 'nameTextMapHash': 101}],
                 'BinOutput/Monster/Aahigaru_Male_01_25050301.json': {'combat': {'property': {'weight': 50}}},
+                'BinOutput/Ability/Temp/MonsterAbilities/ConfigAbility_Hili.json': [],
+                'BinOutput/Unusual/Nested/ViewerOnly.json': {'value': 42},
             }))
 
         path = self.work / 'scriptconfig.json'
@@ -1373,6 +2163,8 @@ class ToolTests(unittest.TestCase):
             binpath = Path(loaded['BinPath'])
             self.assertIn('YuanShenResources', binpath.parts)
             self.assertEqual([item.name for item in (binpath / 'Monster').iterdir()], ['Aahigaru_Male_01_25050301.json'])
+            self.assertTrue((binpath / 'Ability' / 'Temp' / 'MonsterAbilities' / 'ConfigAbility_Hili.json').is_file())
+            self.assertEqual(json.loads((binpath / 'Unusual' / 'Nested' / 'ViewerOnly.json').read_text()), {'value': 42})
             mapped = json.loads((dataset / 'MappedExcelBinOutput_EN' / 'AvatarExcelConfigData.json').read_text())
             self.assertEqual(mapped[0]['NameTextMapHash'], '{{Color|Example}}')
             node = subprocess.run(
@@ -1423,7 +2215,7 @@ class ToolTests(unittest.TestCase):
             self.assertEqual(mapped[0]['CombatConfigHash'], '15783791637045877499')
             hyperlinks = json.loads((gura_dataset / 'MappedExcelBinOutput_EN' / 'HyperLinkNameExcelConifgData.json').read_text())
             self.assertEqual(hyperlinks, [{'Id': 7, 'NameTextMapHash': 'Gura'}])
-            self.assertIn('Warning: AvatarSkillDepotExcelConfigData is not in this build', self.stdout.getvalue())
+            self.assertIn('WARNING AvatarSkillDepotExcelConfigData is not in this build', self.stdout.getvalue())
 
         config['ExcelSource'] = 'unknown'
         self.write_json(path, config)

@@ -1,7 +1,27 @@
 // Groups: 1 key (string followed by a colon), 2 string, 3 number, 4 literal.
 const pattern = /("(?:[^"\\\n]|\\.)*")(?=\s*:)|("(?:[^"\\\n]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b/g
 
+export const JSON_HIGHLIGHTS = [
+  { id: 'attackTag', label: 'Attack Tag', test: /^\s*"attackTag"\s*:/ },
+  { id: 'hitImpulseType', label: 'Hit Impulse Type', test: /^\s*"hitImpulseType"\s*:/ },
+  { id: 'elementDurability', label: 'Element Durability', test: /^\s*"elementDurability"\s*:/ },
+  { id: 'enBreak', label: 'Poise (enBreak)', test: /^\s*"enBreak"\s*:/ },
+  { id: 'attenuationTag', label: 'Attenuation Tag', test: /^\s*"attenuationTag"\s*:/ },
+  { id: 'attenuationGroup', label: 'Attenuation Group', test: /^\s*"attenuationGroup"\s*:/ },
+  { id: 'blunt', label: 'Strike Type: Blunt', test: /^\s*"strikeType"\s*:\s*"Blunt"/i },
+]
+
 export interface JsonToken { text: string; kind?: 'key' | 'string' | 'number' | 'literal' }
+
+/** Shortest decimal (up to seven places) that preserves an extracted float32 value. */
+export function cleanFloat32(value: number): number {
+  if (!Number.isFinite(value) || Number.isInteger(value) || Math.fround(value) !== value) return value
+  for (let digits = 0; digits < 8; digits++) {
+    const rounded = Number(value.toFixed(digits))
+    if (Math.fround(rounded) === value) return rounded
+  }
+  return value
+}
 
 export function jsonTokens(text: string): JsonToken[] {
   const tokens: JsonToken[] = []

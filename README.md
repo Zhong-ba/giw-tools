@@ -47,13 +47,19 @@ data from two public repositories. Set `"DataSource": "remote"` (the older value
 | Setting | Default | Provides |
 | --- | --- | --- |
 | `ExcelSource` | `dimbreath` | `ExcelBinOutput` and the `TextMap`s used to resolve its text |
-| `BinOutputSource` | `gura` | `BinOutput/Monster` (enemy weight and endure type) and the character files shown by the web UI's **Game Data** panel |
+| `BinOutputSource` | `gura` | The complete `BinOutput` tree, used by generators and the **BinOutput Viewer** |
 
 Values: `dimbreath` = [DimbreathBot/AnimeGameData](https://github.com/DimbreathBot/AnimeGameData),
 `gura` = [GuraFoundation/YuanShenResources](https://gitlab.com/GuraFoundation/YuanShenResources).
 TextMaps always come from the Excel source, because Excel text hashes must
 resolve against the same build. Run `.\quickSetup.bat` after changing either
 setting; the web UI's Dataset page can also change them.
+
+Setup downloads the complete upstream BinOutput tree, including enemy abilities
+and folders not used by the generators. This requires more disk space and
+preparation time than the previous limited subset. Rerun setup for
+existing datasets to prepare the expanded layout; the viewer can only show
+files present in the selected dataset.
 
 Each source follows the latest `main` revision by default. To pin an older
 build, set `ExcelRevision` and/or `BinOutputRevision` to a full commit hash
@@ -132,6 +138,81 @@ file to select another profile for both Python and Node. Setup also accepts
 `python setupData.py --config "<path to config>"`; use the environment variable
 when running tools against that alternate profile afterward.
 
+## Particle Generation
+Inspect raw particle-generation evidence without generating pages:
+```powershell
+python particleGeneration.py --id 10000003 10000073 --output particles.json
+```
+This uses the configured, prepared dataset and the same character-file discovery
+as Advanced Properties. Use `--skilldepot` for a selectable-element character.
+The JSON lists generation events, conditional expected particle counts, random
+chances, state predicates, modifier lifetimes, reverse modifier-call traces, and
+talent configurations that add the ability.
+
+Run a complete coverage audit from the CLI (the web tool is currently hidden
+from the tool list):
+```powershell
+python particleGeneration.py --audit --output particle-audit.json
+```
+The audit includes every canonical `AVATAR_FORMAL` record and all its candidate
+skill depots, without merging Traveler genders or excluding unreleased formal
+characters for missing ascension costs. Trial/template variants and non-formal
+records are listed separately as exclusions. Incomplete depots and extraction
+errors remain explicit entries, not successful coverage.
+
+The JSON contains dataset paths, summary counts, primary and overlapping blocker
+counts, candidate event patterns, and each variant's raw evidence and output
+status. Candidate patterns are research groupings, **not** automatic approval for
+wiki output. The audit never fetches or edits wiki pages. CLI extraction errors
+produce a nonzero exit code after the report is written; web jobs retain the
+report and fail explicitly. `--output` writes UTF-8 directly, avoiding shell
+redirection encoding differences. Omit it to print JSON instead.
+
+Counts are **per event**, not per cast. Separately gated alternatives are not
+added together; multiple contributing modifiers may need combining after review.
+Modifier lifetimes are not automatically treated as effective particle cooldowns.
+Unknown expressions/actions produce unresolved counts and warnings, not guessed
+numbers. No detected generation does not establish zero generation. Ability
+activation, talent overrides, spawn locations and shared-file coverage still need
+validation. Raw extraction alone does not establish a publishable Skill note.
+
+Character Kit's **Include Particle Generation** option (enabled by default) uses
+`particlePages.py` to turn reviewed event patterns into Elemental Skill gameplay
+notes and an additional **Energy/Data** update. Reviewed mappings cover Arataki
+Itto, Bennett, Chongyun, Diluc, Diona, Gorou, Jean, Kaedehara Kazuha, Kamisato
+Ayaka, Kaveh, Nahida, Navia, Neuvillette, Thoma, Tighnari and Venti.
+Traveler's Hydro, Dendro and Cryo depots are also reviewed for both genders;
+Anemo, Geo, Electro and Pyro still produce review reports without automatic
+particle notes or Energy/Data replacements.
+The mappings supply press/hold, hit-unit and spawn-point semantics, not particle
+quantities: counts come from the selected dataset. Generation predicates, local
+trigger chains, modifier gates, spawn configurations and the outcome distribution
+must match the reviewed pattern. Additional or ambiguous events block automatic
+output rather than being silently ignored.
+
+Every enabled run writes `Particle Generation.json` in the character's output
+folder with the raw evidence, output status and any review reason. Other
+characters—including zero-generation cases—remain review-only until their
+semantics have been reviewed. A decimal expectation is emitted only for an
+integer guaranteed count plus at most one possible extra particle. Random
+generation preserves shared and nested branch identities, so a choice
+between four and five particles is correctly represented as 4.5, rather than
+mistaken for two independent drops. Nonadjacent outcomes (e.g. zero or two,
+despite their average of one) are rejected. Modifier
+lifetimes are not generally promoted to effective cooldowns; Nahida's reviewed
+7s gate is currently the only rendered particle cooldown.
+
+Use `--noparticles` (or untick **Include Particle Generation**) to disable
+particle notes, the report and Energy/Data generation. `--nodatapages True`
+disables the Energy/Data update but keeps Skill notes and the report.
+Particle output works independently of Advanced Properties. Energy/Data is
+fetched live, retains its Traveler-first ordering, and preserves existing
+character rows unless `--updateexisting` / **Update Existing Entries** is enabled.
+Only changed page revisions are written. Uncertain cases never replace existing
+wiki rows. When an Energy/Data update is requested,
+an older generated `Energy Data.wikitext` in that character's output directory
+is removed first, so skipped or failed updates cannot leave a stale posting file.
+
 ## Validation
 Run the core Python regression tests from this directory after installing the requirements:
 ```bash
@@ -167,7 +248,22 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   dataset updates. The queue accepts at most ten pending/running jobs.
 - Job history and outputs survive restarts. Interrupted jobs are marked failed;
   they are not silently retried. Shutdown waits for queued/running jobs to finish.
-  Logs show real tool progress; no estimated percentage is fabricated.
+  Logs use elapsed timestamps and INFO/WARNING/ERROR levels, with stage messages
+  and throttled batch counts. Tracebacks are retained on failure; verbose effect
+  dictionaries, per-file save/copy confirmations, and expected Traveler depot skips
+  are DEBUG-only. Missing optional files and setup field/readability issues are
+  counted warnings. Uncaptured setup command output is streamed through the parent
+  reporter; command failures keep their diagnostics and nonzero exit status.
+  Shared generators use the same reporting in CLI runs. Intentional CLI payloads
+  (JSON, wikitext, paths, and revision listings) remain plain stdout.
+  Progress shows the current stage and real completed/total counts where known
+  (not a weighted overall estimate). Loading, network, subprocess, and finalization
+  stages are indeterminate. Only successful jobs show completed overall progress,
+  after output files are validated. Warnings are counted without changing whether
+  optional generation failures stop the tool.
+  The Log tab colors warnings/errors and offers **Copy Log** and **Download Full Log**.
+  Its preview is limited to the latest 128 KB; exports include the entire log.
+  Newly collected hosted jobs retain the full log in browser storage, too.
 - Other Languages opens a dedicated generator instead of creating a job. Look up
   an exact name (case insensitive) in the chosen language, or enter a TextMapHash.
   Each distinct set of localized names gets a collapsible result card with Copy,
@@ -195,8 +291,30 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   Attribute Scaling sections with the Attribute Scaling tool's tables (same max
   levels, default 11/13/13; needs Node.js). On the command line use
   `python parseCharKit.py ... --levels 11 13 13`, or `--noscaling True` to leave
-  the sections empty. If scaling can't be generated (e.g. Traveler or no Node.js),
+  the sections empty. If scaling can't be generated (e.g. no Node.js),
   the kit is still written with empty sections and the reason is logged.
+- Character Kit detects Aether (`10000005`) and Lumine (`10000007`) automatically.
+  It discovers all complete elemental kits from their candidate skill depots,
+  skips the incomplete elementless depot, and writes separate `Traveler (Anemo)`,
+  `Traveler (Geo)`, etc. folders. All seven elements, including Cryo, are supported.
+  Each folder has its own talents, passives, constellations and particle report.
+  Wiki titles, character parameters and navboxes use `Traveler (Element)`;
+  talent upgrades use that element's region (Geo Normal Attacks use both
+  Mondstadt and Liyue). Normal Attack scaling uses `{{Past Memories}}`, and
+  Advanced Properties include separately labelled Aether and Lumine sections.
+  Cryo's additional Stellar passive is included.
+  ```
+  python parseCharKit.py --id 10000005
+  python parseCharKit.py --id 10000007 --skilldepot 705
+  python particleGeneration.py --id 10000005 10000007 --output traveler-particles.json
+  ```
+  Without a depot override, release versions are looked up separately on each
+  elemental wiki article; the common version field/`--ver` is not used.
+  With an override, `--ver` works normally. The legacy Traveler checkbox/flag
+  is unnecessary. The same behavior applies in the web UI.
+  Combat/Energy data-page changes from every element are accumulated into one
+  posting file per wiki page under `Traveler/Data Pages`, not competing full-page
+  copies in each element folder. Existing entries are still preserved by default.
 - Character Kit's release version is looked up in the character's wiki article
   (first parameter of `{{Change History|...}}` in its Change History section,
   `wikiVersion.py`). The web UI fills the empty version field when a character is
@@ -233,7 +351,8 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   after the scaling row they reuse (with a Lunar-Bloom/Lunar-Charged/... suffix
   for reaction hits) or else the talent's name, so rename them. Use
   `--noap True` (or untick **Include Advanced Properties**) to leave all these
-  sections empty. The Traveler needs a skill depot override. A Normal
+  sections empty. Traveler depots are selected automatically by Character Kit;
+  standalone Advanced Properties calls still need an explicit depot. A Normal
   Attack/Skill/Burst with no attacks (e.g. Itto's Burst) gets no Advanced
   Properties section; with `--noap` or when generation fails, the sections stay empty.
 - From the same attack data, Character Kit also adds the character to the current
@@ -257,7 +376,10 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   Each file is a whole page revision, so review the new rows (names, missing hitlag
   scale defaulting to 0.01) and post it before the page changes again. Use
   `--nodatapages True` (or untick **Update Combat Data Pages**) to skip it; it also
-  needs Advanced Properties and network access to the wiki.
+  needs Advanced Properties and network access to the wiki. With **Include
+  Particle Generation** enabled, the same data-page option also generates the
+  reviewed Energy/Data update described above; that page does not require
+  Advanced Properties.
 - Talent infoboxes get `scale_att1`/`scale_att2` from the Attribute Scaling rows'
   stats (`(%Max HP)` titles, `4.4% Max HP + 424` values; plain `(%)` is ATK), most
   used first; this matches about 89% of existing wiki pages exactly. Only Fontaine
@@ -276,7 +398,9 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   Max levels are set separately for Normal Attack, Elemental Skill, and Elemental
   Burst (default 11/13/13); an alternate sprint table (e.g. Ayaka, Mona) uses the
   Elemental Skill level.
-  Characters with selectable elements (Traveler) are not supported.
+  The standalone Attribute Scaling UI does not select Traveler elements;
+  use Character Kit for Traveler scaling. Python callers can pass
+  `skill_depot=...` to `talent_scaling()`.
   The web version writes one numbered file per talent (template only); the CLI
   keeps a single file and the `-l` option. Both append the scaling to damage
   titles: `(%)` for ATK, `(%Max HP)`, `(%DEF)`, or `(%EM)`, e.g.
@@ -355,19 +479,54 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   Ctrl+S to save); edits overwrite that job's file and keep its line endings.
   Wikitext is shown as syntax-highlighted source, not rendered as HTML or
   expanded MediaWiki templates.
-- Completed Character Kit jobs have a **Game Data** button that opens the
-  character's game files beside the output (also while editing): `ConfigAvatar`,
-  its `ConfigAbility` and AniEvent ability files, `ConfigGadget_SkillObj` files,
-  and its `AttackAttenuationExcelConfigData` rows (groups named after the
-  character's internal name, e.g. `Ambor` for Amber). Files come from the current
-  BinOutput/Excel sources, not a snapshot taken when the job ran. Filter pills
-  narrow a file to its **Attack Info** blocks or its **GenerateElemBall**
-  actions (ability files), each labelled with its ability name and JSON path.
+- **BinOutput Viewer** opens directly without creating a job. Its left-hand
+  **Filter By** offers **None**, **Character**, **Enemy**, and **Gadget** radio
+  buttons. Entity dropdowns are searchable by name or ID (and internal name/type
+  where available); every match is available by scrolling, with large lists
+  virtualized to keep the dropdown responsive. Dropdowns use the available
+  screen/dialog height and resize with the viewport. Native middle-mouse
+  autoscrolling (click or hold-and-drag) is available where supported by the browser.
+  Use the arrow keys and Enter to select, or Escape to close the dropdown.
+  None browses the complete tree and loads folders on demand; filtered trees
+  start fully expanded. Single-subfolder chains appear as compact paths such
+  as `Ability / Temp / AvatarAbilities` in either mode.
+  Character/enemy/gadget filters find matching
+  configs and follow explicit ability and gadget dependencies, including files
+  whose names do not match the selected entity. Character discovery also uses
+  talent/skill aliases; either Traveler includes shared and Aether/Lumine
+  elemental ability files for all seven elements. **Discovery Notes** report
+  missing tables, unreadable files, and unresolved ability definitions:
+  relevance is a review aid, not a guarantee of exhaustive coverage. Enemy
+  discovery recognizes readable names, `ConfigMonster_` names, and explicit
+  monster IDs; hash-only filenames without those links may remain unresolved.
+  Gadgets are selected by internal `JsonName` and ID, with their type shown.
+  Gadget discovery indexes exact entries inside shared config files and follows
+  only the selected entry's dependencies, while displaying the original complete
+  files and jumping to the selected gadget's entry. The same lookup resolves
+  gadgets linked from characters and enemies.
+  Missing `JsonName` values, configs, or linked gadget IDs appear in Discovery
+  Notes rather than being guessed.
+- Completed Character Kit jobs keep their **Game Data** button, opening the
+  same BinOutput Viewer beside the output (also while editing), initially
+  filtered to the job's character. Relevant files include avatar/monster
+  configs, ability and AniEvent files, linked gadgets, character talents,
+  and matching `AttackAttenuationExcelConfigData` rows. Files come from the
+  current BinOutput/Excel sources, not a snapshot taken when the job ran.
+  Filter pills narrow a file to its **Attack Info** blocks or its
+  **GenerateElemBall** actions, each labelled with its ability name and JSON path.
   The Attack Info view has a table of contents by ability name (gadget and
   avatar files use the animation event name instead), keys inside `attackInfo`
-  are sorted alphabetically, and lines with `attackTag`, `hitImpulseType`,
-  `elementDurability`, `enBreak`, `attenuationTag` or `attenuationGroup` are
-  highlighted. **Ctrl+F** searches the open file instead of the page.
+  are sorted alphabetically, and **Row Highlights** toggles individual rules
+  for `attackTag`, `hitImpulseType`, `elementDurability`, `enBreak`,
+  `attenuationTag`, `attenuationGroup`, and `strikeType: Blunt` (all on by
+  default). **Ctrl+F** searches the open file instead of the page; copying
+  includes the full file or currently filtered data. **Clean Decimals** is on
+  by default: it removes float32 extraction noise (for example,
+  `0.26600000262260437` becomes `0.266`) using the character tool's round-trip
+  rule, while preserving integers and non-float32 values. It affects display,
+  search, and copied data only; turn it off to inspect original numeric values.
+  Large files remain
+  virtualized, with a 16 MB per-file viewing limit.
 - Text output files have the same search: the magnifier button above the
   preview (or **Ctrl+F** when the Game Data panel is closed) highlights matches,
   with Enter/Shift+Enter or the arrows to step through them.

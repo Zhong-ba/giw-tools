@@ -5,6 +5,7 @@ alphabetical order. Existing character rows are preserved unless updating them i
 """
 import re
 from types import SimpleNamespace
+import toolLog as report
 
 from advancedProperties import combat_data, icd_sequence, number
 
@@ -167,7 +168,8 @@ def _table(text: str, heading: str) -> tuple[int, int] | None:
     return (start + 1, end + 1) if end >= 0 else None
 
 
-def insert_rows(text: str, heading: str, name: str, build, update_existing: bool = False) -> tuple[str, str]:
+def insert_rows(text: str, heading: str, name: str, build, update_existing: bool = False,
+                *, sort_key=str.casefold) -> tuple[str, str]:
     """Inserts a character's rows into the table under a heading, before the first character that sorts after them.
     build(table lines) returns the rows, or nothing to skip. Opt-in updates replace the character's existing block.
     Returns (text, outcome)."""
@@ -202,7 +204,7 @@ def insert_rows(text: str, heading: str, name: str, build, update_existing: bool
         if matches:
             return text[:span[0]] + '\n'.join(lines) + '\n' + text[span[1]:], 'removed existing rows; nothing to add'
         return text, 'nothing to add'
-    position = next((index for index, existing in names.items() if existing.casefold() > name.casefold()), len(lines))
+    position = next((index for index, existing in names.items() if sort_key(existing) > sort_key(name)), len(lines))
     block = [line for row in rows for line in ('|-', row)]
     lines[position:position] = block
     action = 'updated' if matches else 'added'
@@ -436,11 +438,15 @@ def update_pages(name: str, data: SimpleNamespace, texts: dict[str, str], update
         TARGETING: lambda text, log: targeting_page(text, name, data, log, update_existing),
     }
     pages, log = {}, []
-    for title, builder in builders.items():
+    for title, builder in report.track(list(builders.items()), 'Updating combat data pages'):
         if title not in texts:
             log.append(f'{title}: could not fetch the current revision')
+            report.warning(log[-1])
             continue
+        previous = len(log)
         updated = builder(texts[title], log)
+        for message in log[previous:]:
+            report.info(message)
         if updated != texts[title]:
             pages[title] = updated
     return pages, log
@@ -450,5 +456,7 @@ def combat_pages(character_id: int, skill_depot: int | None, name: str, fetch=No
     """Fetches the current combat data pages and adds the character to them. See update_pages."""
     if fetch is None:
         from wikiVersion import page_texts as fetch
+    report.stage('Loading combat data')
     data = combat_data(character_id, skill_depot)
+    report.stage('Fetching current combat data pages')
     return update_pages(name, data, fetch(PAGES), update_existing)

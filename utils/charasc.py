@@ -1,6 +1,7 @@
 import json
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.files import write_file
 
 ASCENSION_TITLE = 'Module:Character Ascensions and Stats/data'
@@ -104,7 +105,7 @@ def ascension_data(characters = None):
     exchange = {item.get('NameTextMapHash') for item in _load('MaterialExcelConfigData')
                 if item.get('MaterialType') == 'MATERIAL_EXCHANGE'}
     out = {}
-    for name, (avatar, rows) in characters.items():
+    for name, (avatar, rows) in report.track(list(characters.items()), 'Building character ascension and stat data'):
         levels = [list(_costs(row)) for row in rows if _costs(row)]
         # The gem family comes from the Sliver; other names such as Transoceanic Chunk can share its suffixes.
         gem = next((_strip(item, (' Sliver',)) for level in levels for item in level if item.endswith(' Sliver')), None)
@@ -177,7 +178,7 @@ def talent_data(characters = None):
         return skills.get(ids[1] if len(ids) > 1 else ids[0] if ids else None, {}).get('ProudSkillGroupId')
 
     out, regions = {}, {}
-    for name, (avatar, _) in characters.items():
+    for name, (avatar, _) in report.track(list(characters.items()), 'Building talent material data'):
         candidates = avatar.get('CandSkillDepotIds') or []
         if candidates:
             for depot in map(depots.get, candidates):
@@ -260,9 +261,13 @@ def talent_lua(data = None):
 def write_character_data(directory = None):
     '''Writes both modules and returns how many characters each lists.'''
     directory = directory or CONFIG.OUTPUT_PATH
+    report.stage('Loading playable characters and ascension materials')
     characters = playable_characters()
     ascension = ascension_data(characters)
     talents = talent_data(characters)
+    report.stage('Writing character data modules', 2)
     write_file(f'{directory}/Character_Ascensions_and_Stats_data.lua', ascension_lua(ascension), overwrite = True)
+    report.advance(1)
     write_file(f'{directory}/Talent_Upgrade_data.lua', talent_lua(talents), overwrite = True)
+    report.advance(2)
     return len(ascension), len(talents[0]) + len(talents[1])

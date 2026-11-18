@@ -8,15 +8,17 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 from threading import RLock
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, model_validator
 
 from dataSource import ROOT, load_config
 from webui.tools import TOOLS
 from webui.worker import serve
+from toolLog import format_message, write_progress
 
 
 def now() -> str:
@@ -31,6 +33,20 @@ class Artifact(BaseModel):
     file_page: str | None = None
 
 
+class JobProgress(BaseModel):
+    stage: str
+    completed: int | None = Field(default=None, ge=0)
+    total: int | None = Field(default=None, ge=0)
+    message: str = ''
+    warnings: int = Field(default=0, ge=0)
+
+    @model_validator(mode='after')
+    def valid_counts(self) -> 'JobProgress':
+        if self.completed is not None and self.total is not None and self.completed > self.total:
+            raise ValueError('Completed work cannot exceed the stage total.')
+        return self
+
+
 class Job(BaseModel):
     id: str
     tool_id: str
@@ -42,6 +58,7 @@ class Job(BaseModel):
     error: str | None = None
     files: list[Artifact] = Field(default_factory=list)
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
+    progress: JobProgress | None = None
 
 
 class QueueFullError(Exception):
@@ -82,9 +99,7 @@ class ResidentWorker:
             return self.connection.recv()
         except (EOFError, OSError):
             self.stop()
-            with (directory / 'log.txt').open('a', encoding='utf-8') as log:
-                log.write('\nThe worker process exited unexpectedly (possibly out of memory).\n')
-            return 'The worker process exited unexpectedly. Open the log for details.'
+            return 'The worker process exited unexpectedly (possibly out of memory). Open the log for details.'
 
     def stop(self) -> None:
         if self.process is None:
@@ -126,10 +141,13 @@ class JobManager:
             if not re.fullmatch(r'[0-9a-f]{32}', job.id) or path.parent.name != job.id:
                 raise ValueError(f'Invalid job metadata: {path}')
             if job.status in ('queued', 'running'):
+                progress = self._snapshot(job).progress
                 job.status = 'failed'
                 job.error = 'The server stopped before this job completed. Submit the tool again.'
+                job.progress = JobProgress(stage='Failed', message=job.error, warnings=progress.warnings if progress else 0)
                 job.finished_at = now()
                 self._save(job)
+                self._log(job, 'ERROR', job.error)
             job.files = file_order(job.tool_id, job.files)
             self.jobs[job.id] = job
             try:
@@ -158,19 +176,33 @@ class JobManager:
 
     def list_jobs(self, client: str | None = None) -> list[Job]:
         with self.lock:
-            return [job.model_copy(deep=True) for job in sorted(
+            return [self._snapshot(job) for job in sorted(
                 self.jobs.values(), key=lambda item: item.created_at, reverse=True,
             ) if self.owners.get(job.id) == client]
 
     def get(self, job_id: str, client: str | None = None) -> Job:
         with self.lock:
-            return self._owned(job_id, client).model_copy(deep=True)
+            return self._snapshot(self._owned(job_id, client))
+
+    def _snapshot(self, job: Job) -> Job:
+        result = job.model_copy(deep=True)
+        path = self.root / job.id / 'progress.json'
+        if job.status == 'running' and path.is_file():
+            result.progress = JobProgress.model_validate_json(path.read_text(encoding='utf-8'))
+        return result
+
+    def _log(self, job: Job, level: str, message: str) -> None:
+        elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(job.started_at or job.created_at)).total_seconds()
+        with (self.root / job.id / 'log.txt').open('a', encoding='utf-8') as log:
+            log.write(format_message(level, message, elapsed) + '\n')
 
     def submit(self, tool_id: str, parameters: dict[str, JsonValue], config: dict | None = None,
                client: str | None = None) -> Job:
         tool = TOOLS.get(tool_id)
         if tool is None and tool_id != 'dataset-setup':
             raise KeyError(tool_id)
+        if tool is not None and tool.execute is None:
+            raise ValueError(f'{tool.name} runs directly without creating a job.')
         validated = tool.model.model_validate(parameters).model_dump(mode='json') if tool else {}
         if config is None:
             config = load_config(self.config, require_prepared=bool(tool and tool.requires_dataset))
@@ -209,12 +241,14 @@ class JobManager:
             job = self.jobs[job_id]
             job.status = 'running'
             job.started_at = now()
+            job.progress = JobProgress(stage='Starting')
             self._save(job)
         try:
+            self._log(job, 'INFO', f'Starting {job.name}.')
             if job.tool_id == 'dataset-setup':
                 # Free the loaded TextMaps; they would be stale after a new revision anyway.
                 self.worker.stop()
-                with (directory / 'log.txt').open('wb') as log:
+                with (directory / 'log.txt').open('ab') as log:
                     result = subprocess.run(
                         [sys.executable, '-u', '-m', 'webui.worker', str(directory)],
                         cwd=ROOT, env=dict(os.environ, PYTHONIOENCODING='utf-8'),
@@ -223,6 +257,11 @@ class JobManager:
                 error = f'The tool exited with code {result.returncode}. Open the log for details.' if result.returncode else None
             else:
                 error = self.worker.run(directory)
+            with self.lock:
+                job.progress = self._snapshot(job).progress or JobProgress(stage='Finalizing')
+                job.progress = job.progress.model_copy(update={'stage': 'Finalizing output', 'completed': None, 'total': None, 'message': ''})
+                write_progress(directory / 'progress.json', job.progress.model_dump())
+            self._log(job, 'INFO', 'Finalizing output.')
             files = file_order(job.tool_id, self._artifacts(directory / 'output'))
             with self.lock:
                 job.files = files
@@ -232,8 +271,18 @@ class JobManager:
             with self.lock:
                 job.status = 'failed'
                 job.error = str(error)
+            self._log(job, 'ERROR', traceback.format_exc())
         finally:
             with self.lock:
+                warnings = job.progress.warnings if job.progress else 0
+                if job.status == 'succeeded':
+                    message = (f'Job completed successfully. {len(job.files)} file{"" if len(job.files) == 1 else "s"}, '
+                               f'{warnings} warning{"" if warnings == 1 else "s"}.')
+                    job.progress = JobProgress(stage='Completed', completed=1, total=1, message=message, warnings=warnings)
+                    self._log(job, 'INFO', message)
+                else:
+                    job.progress = JobProgress(stage='Failed', message=job.error or 'Job failed.', warnings=warnings)
+                    self._log(job, 'ERROR', job.error or 'Job failed.')
                 job.finished_at = now()
                 self._save(job)
 

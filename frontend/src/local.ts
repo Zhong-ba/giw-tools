@@ -206,7 +206,7 @@ async function collect(store: Disk, job: Job) {
       const response = await request(`/jobs/${job.id}/files/${encodePath(file.path)}`)
       await store.write(`jobs/${job.id}/output/${file.path}`, await response.blob())
     }
-    const log = await server<{ text: string }>(`/jobs/${job.id}/logs`)
+    const log = await server<{ text: string }>(`/jobs/${job.id}/logs?full=true`)
     await store.write(`jobs/${job.id}/log.txt`, log.text)
     // Written last, so a job only appears once all of its files are saved.
     await save(store, `jobs/${job.id}/job.json`, job)
@@ -513,8 +513,9 @@ async function handleBot(path: string, method: string, body: Record<string, unkn
 /* Routing */
 
 async function handleJobs(path: string, method: string, body: Record<string, unknown>, options: RequestInit): Promise<unknown> {
-  if (path === '/jobs') return method === 'GET' ? listJobs() : server('/jobs', options)
-  const match = /^\/jobs\/([0-9a-f]{32})(?:\/(files|preview|logs|references)(?:\/(.*))?)?$/.exec(path)
+  const [route, query] = path.split('?', 2)
+  if (route === '/jobs') return method === 'GET' ? listJobs() : server(path, options)
+  const match = /^\/jobs\/([0-9a-f]{32})(?:\/(files|preview|logs|references)(?:\/(.*))?)?$/.exec(route)
   if (!match) throw new ApiError('Not found.', 404)
   const [, id, section, rest] = match
   const { job, local } = await getJob(id)
@@ -537,12 +538,13 @@ async function handleJobs(path: string, method: string, body: Record<string, unk
     }
   }
   if (section === 'logs') {
-    const text = await readText(store, `jobs/${id}/log.txt`) ?? ''
-    return { text: text.slice(-131072), truncated: text.length > 131072 }
+    const blob = await store.read(`jobs/${id}/log.txt`) ?? new Blob()
+    const full = new URLSearchParams(query).get('full') === 'true'
+    return { text: await (full ? blob : blob.slice(-131072)).text(), truncated: !full && blob.size > 131072 }
   }
   if (section === 'references') {
     if (job.tool_id !== 'character-kit') throw new ApiError('This job has no game data references.', 404)
-    return server(`/characters/${Number(job.parameters?.character_id)}/references${rest ? `/${rest}` : ''}`)
+    return server(`/characters/${Number(job.parameters?.character_id)}/references${rest ? `/${rest}` : ''}`, options)
   }
   const file = job.files.find(file => file.path === name)
   const blob = file ? await store.read(`jobs/${id}/output/${name}`) : null

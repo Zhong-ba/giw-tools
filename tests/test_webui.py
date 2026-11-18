@@ -2,6 +2,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+from threading import Event
 import time
 import unittest
 import urllib.parse
@@ -13,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from webui.app import create_app
 from webui.jobs import Job, JobManager
-from webui.tools import LANGUAGES
+from webui.tools import LANGUAGES, TOOLS
 
 
 class WebTests(unittest.TestCase):
@@ -76,13 +77,77 @@ class WebTests(unittest.TestCase):
         for path in ('../config.json', 'config.json', '/etc/passwd'):
             self.assertEqual(self.client.get(f"/api/jobs/{job['id']}/files/{path}").status_code, 404)
         self.assertIn('completed successfully', self.client.get(f"/api/jobs/{job['id']}/logs").json()['text'])
+        self.assertEqual(job['progress']['stage'], 'Completed')
+        self.assertEqual((job['progress']['completed'], job['progress']['total']), (1, 1))
+        log_path = self.jobs / job['id'] / 'log.txt'
+        log = log_path.read_text(encoding='utf-8')
+        self.assertNotIn('File saved successfully:', log)
+        self.assertEqual(log.count('Job completed successfully.'), 1)
+        self.assertLess(log.index('Finalizing output'), log.index('completed successfully'))
+        with log_path.open('a', encoding='utf-8') as file:
+            file.write('BEGIN FULL LOG\n' + 'Long output\n' * 15000 + 'END FULL LOG\n')
+        tail = self.client.get(f"/api/jobs/{job['id']}/logs").json()
+        full = self.client.get(f"/api/jobs/{job['id']}/logs?full=true").json()
+        self.assertTrue(tail['truncated'])
+        self.assertNotIn('BEGIN FULL LOG', tail['text'])
+        self.assertIn('END FULL LOG', tail['text'])
+        self.assertFalse(full['truncated'])
+        self.assertEqual(full['text'], log_path.read_bytes().decode('utf-8'))
         self.assertEqual(self.client.get('/api/jobs/not-a-job').status_code, 404)
+
+    def test_reporting_live_progress_and_output_validation_failure(self):
+        from toolLog import write_progress
+
+        manager = JobManager(self.config, self.root / 'progress-jobs')
+        entered, release, finalizing, finish = Event(), Event(), Event(), Event()
+        self.addCleanup(manager.close)
+        self.addCleanup(release.set)
+        self.addCleanup(finish.set)
+
+        def execute(directory):
+            write_progress(directory / 'progress.json', {
+                'stage': 'Writing pages', 'completed': 2, 'total': 5, 'warnings': 1,
+            })
+            entered.set()
+            release.wait(5)
+
+        def validate(directory):
+            finalizing.set()
+            finish.wait(5)
+            raise ValueError('Output validation failed.')
+
+        with patch.object(manager.worker, 'run', side_effect=execute), patch.object(manager, '_artifacts', side_effect=validate):
+            job = manager.submit('redirects', {'lines': 'A%%%B'})
+            self.assertTrue(entered.wait(5))
+            live = manager.get(job.id)
+            self.assertEqual(live.status, 'running')
+            self.assertEqual((live.progress.completed, live.progress.total, live.progress.warnings), (2, 5, 1))
+            self.assertEqual(manager.list_jobs()[0].progress, live.progress)
+            release.set()
+            self.assertTrue(finalizing.wait(5))
+            pending = manager.get(job.id)
+            self.assertEqual(pending.progress.stage, 'Finalizing output')
+            self.assertIsNone(pending.progress.total)
+            path = manager.root / job.id / 'log.txt'
+            self.assertNotIn('completed successfully', path.read_text())
+            finish.set()
+            manager.executor.submit(lambda: None).result(timeout=5)
+        failed = manager.get(job.id)
+        self.assertEqual((failed.status, failed.progress.stage, failed.progress.warnings), ('failed', 'Failed', 1))
+        self.assertIsNone(failed.progress.total)
+        self.assertIn('ValueError: Output validation failed.', path.read_text())
+        self.assertNotIn('completed successfully', path.read_text())
+        saved = Job.model_validate_json((manager.root / job.id / 'job.json').read_text())
+        self.assertEqual(saved.progress, failed.progress)
 
     def test_schema_validation_and_browser_request_boundaries(self):
         tools = self.client.get('/api/tools').json()
         self.assertEqual({tool['id'] for tool in tools}, {'redirects', 'character-kit', 'other-languages',
-                                                         'attribute-scaling', 'character-data', 'enemy', 'bounties', 'fishing-points', 'fish-weights',
+                                                         'binoutput-viewer', 'attribute-scaling', 'character-data', 'enemy', 'bounties', 'fishing-points', 'fish-weights',
                                                          'manual-cooking', 'spiral-abyss', 'stygian-onslaught', 'imaginarium-theater'})
+        self.assertEqual([tool['id'] for tool in tools[-3:]], ['other-languages', 'binoutput-viewer', 'redirects'])
+        self.assertEqual(next(tool['category'] for tool in tools if tool['id'] == 'other-languages'), 'Utilities')
+        self.assertIn('particle-audit', TOOLS)
         self.assertIn('properties', tools[0]['schema'])
         kit = next(tool for tool in tools if tool['id'] == 'character-kit')
         self.assertTrue({'element', 'generate_icons'}.isdisjoint(kit['schema']['properties']))
@@ -443,6 +508,7 @@ class WebTests(unittest.TestCase):
             self.assertEqual([item['id'] for item in client.get('/api/jobs', headers=first).json()], [job['id']])
             self.assertEqual(client.get('/api/jobs', headers=second).json(), [])
             for response in (client.get(f"/api/jobs/{job['id']}", headers=second),
+                             client.get(f"/api/jobs/{job['id']}/logs?full=true", headers=second),
                              client.get(f"/api/jobs/{job['id']}/files/Redirects/First.wikitext", headers=second),
                              client.delete(f"/api/jobs/{job['id']}", headers=second)):
                 self.assertEqual(response.status_code, 404)
@@ -608,6 +674,223 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(client.get(f'{base}/{key}').status_code, 404)
             self.assertEqual(client.get(f"/api/jobs/{jobs['redirects']}/references").status_code, 404)
 
+    def test_traveler_references_include_shared_and_gender_elemental_abilities(self):
+        excel = self.dataset / 'MappedExcelBinOutput_EN'
+        (excel / 'AvatarExcelConfigData.json').write_text(json.dumps([
+            {'Id': 10000005, 'NameTextMapHash': 'Traveler', 'IconName': 'UI_AvatarIcon_PlayerBoy'},
+            {'Id': 10000007, 'NameTextMapHash': 'Traveler', 'IconName': 'UI_AvatarIcon_PlayerGirl'},
+        ]), encoding='utf-8')
+        folder = self.dataset / 'BinOutput' / 'Ability' / 'Temp' / 'AvatarAbilities'
+        folder.mkdir(parents=True)
+        expected = ['ConfigAbility_Avatar_Player_Common.json', 'ConfigAbility_Avatar_Player_Wind.json',
+                    'ConfigAbility_Avatar_PlayerBoy_Wind.json', 'ConfigAbility_Avatar_PlayerGirl_Ice.json']
+        for name in [*expected, 'ConfigAbility_Avatar_PlayerOther.json', 'ConfigAbility_Avatar_Ambor.json']:
+            (folder / name).write_text('[]', encoding='utf-8')
+        for character in (10000005, 10000007):
+            response = self.client.get(f'/api/characters/{character}/references')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(sorted(file['name'] for file in response.json()['files']), sorted(expected))
+
+    def test_binoutput_tree_file_boundaries_and_jobless_tool(self):
+        root = self.dataset / 'BinOutput'
+        (root / 'Unusual' / 'Nested').mkdir(parents=True)
+        (root / 'Unusual' / 'Nested' / 'Example.json').write_text('{"value": 1}', encoding='utf-8')
+        (root / 'private.txt').write_text('not JSON', encoding='utf-8')
+        listing = self.client.get('/api/binoutput/tree')
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertEqual(listing.json()['entries'], [
+            {'key': 'Unusual/Nested', 'name': 'Unusual / Nested', 'directory': True, 'size': None},
+        ])
+        listing = self.client.get('/api/binoutput/tree', params={'path': 'Unusual/Nested'})
+        self.assertEqual(listing.json()['entries'][0]['key'], 'Unusual/Nested/Example.json')
+        response = self.client.get('/api/binoutput/file', params={'path': 'Unusual/Nested/Example.json'})
+        self.assertEqual(response.json(), {'text': '{"value": 1}'})
+        with patch('webui.references.MAX_FILE_SIZE', 4):
+            self.assertEqual(self.client.get('/api/binoutput/file',
+                                            params={'path': 'Unusual/Nested/Example.json'}).status_code, 413)
+            from webui.references import read_reference
+            with self.assertRaises(OverflowError):
+                read_reference({'path': None, 'text': '\u00e9' * 3})
+        for path in ('../config.json', r'..\config.json', '/config.json', 'C:/config.json', 'Unusual/../../config.json'):
+            for endpoint in ('tree', 'file'):
+                with self.subTest(path=path, endpoint=endpoint):
+                    self.assertEqual(self.client.get(f'/api/binoutput/{endpoint}', params={'path': path}).status_code, 400)
+        self.assertEqual(self.client.get('/api/binoutput/file', params={'path': 'private.txt'}).status_code, 404)
+        self.assertEqual(self.client.get('/api/binoutput/references').status_code, 422)
+        self.assertEqual(self.client.get('/api/binoutput/references',
+                                        params={'character_id': 10000021, 'enemy_id': 1}).status_code, 422)
+        response = self.client.post('/api/jobs', json={'tool_id': 'binoutput-viewer', 'parameters': {}})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn('without creating a job', response.text)
+        self.assertEqual(self.client.get('/api/jobs').json(), [])
+
+    def test_binoutput_compact_folders_stop_at_files_or_branches(self):
+        root = self.dataset / 'BinOutput'
+        for relative in ('Chain/Only/Fork/Left/Leaf/A.json', 'Chain/Only/Fork/Right/B.json',
+                         'Mixed/A.json', 'Mixed/Child/B.json'):
+            path = root.joinpath(*relative.split('/'))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{}', encoding='utf-8')
+        (root / 'Chain' / 'ignored.txt').write_text('not shown', encoding='utf-8')
+        entries = self.client.get('/api/binoutput/tree').json()['entries']
+        self.assertEqual([(item['key'], item['name']) for item in entries],
+                         [('Chain/Only/Fork', 'Chain / Only / Fork'), ('Mixed', 'Mixed')])
+        entries = self.client.get('/api/binoutput/tree', params={'path': 'Chain/Only/Fork'}).json()['entries']
+        self.assertEqual([(item['key'], item['name']) for item in entries],
+                         [('Chain/Only/Fork/Left/Leaf', 'Left / Leaf'), ('Chain/Only/Fork/Right', 'Right')])
+        response = self.client.get('/api/binoutput/file', params={'path': entries[0]['key'] + '/A.json'})
+        self.assertEqual(response.json(), {'text': '{}'})
+
+    def test_binoutput_character_enemy_links_and_index_refresh(self):
+        excel = self.dataset / 'MappedExcelBinOutput_EN'
+        tables = {
+            'AvatarExcelConfigData': [{'Id': 10000021, 'NameTextMapHash': 'Amber',
+                                      'IconName': 'UI_AvatarIcon_Ambor', 'SkillDepotId': 2101}],
+            'AvatarSkillDepotExcelConfigData': [{'Id': 2101, 'Skills': [1, 2], 'EnergySkill': 5}],
+            'AvatarSkillExcelConfigData': [{'Id': 2, 'ProudSkillGroupId': 21}],
+            'ProudSkillExcelConfigData': [{'ProudSkillGroupId': 21, 'OpenConfig': 'Renamed_SkillUpgrade_2'}],
+            'AvatarTalentExcelConfigData': [],
+            'GadgetExcelConfigData': [{'Id': 40000001, 'JsonName': 'UnrelatedTurret'}],
+            'MonsterExcelConfigData': [{'Id': 21010101, 'MonsterName': 'Hili_None_01', 'DescribeName': 'Hilichurl'}],
+        }
+        for name, rows in tables.items():
+            (excel / f'{name}.json').write_text(json.dumps(rows), encoding='utf-8')
+        files = {
+            'Avatar/ConfigAvatar_Ambor.json': {'abilities': [{'abilityName': 'Shared_Explosion'}]},
+            'Ability/Temp/AvatarAbilities/ConfigAbility_Avatar_Renamed.json': [],
+            'Ability/Temp/MonsterAbilities/UnrelatedFilename.json': [
+                {'Default': {'abilityName': 'Shared_Explosion', 'onAdded': [
+                    {'$type': 'CreateGadget', 'gadgetID': 40000001},
+                    {'$type': 'AddAbility', 'abilityName': 'Shared_Explosion'},
+                ]}},
+                {'Default': {'abilityName': 'NotReachable', 'onAdded': [
+                    {'$type': 'AddAbility', 'abilityName': 'Other_Character'},
+                ]}},
+            ],
+            'Ability/Misc/Followup.json': [{'Default': {'abilityName': 'Shared_Followup', 'modifiers': {}}}],
+            'Ability/Misc/Other.json': [{'Default': {'abilityName': 'Other_Character', 'modifiers': {}}}],
+            'Gadget/ConfigGadget_UnrelatedTurret.json': {'abilities': [{'abilityName': 'Shared_Followup'}]},
+            'Monster/Hili_None_01.json': {'abilities': [{'abilityName': 'Shared_Explosion'}]},
+            'Monster/Hili_None_010.json': {},
+            'Monster/ConfigMonster_Hili_None_01.json': {},
+            'Monster/21010101.json': {},
+            'Monster/Variant_21010101.json': {},
+            'Monster/Variant_210101010.json': {},
+        }
+        root = self.dataset / 'BinOutput'
+        for relative, value in files.items():
+            path = root.joinpath(*relative.split('/'))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(value), encoding='utf-8')
+        (root / 'Ability' / 'Misc' / 'Malformed.json').write_text('{broken', encoding='utf-8')
+        for scope in ({'character_id': 10000021}, {'enemy_id': 21010101}):
+            response = self.client.get('/api/binoutput/references', params=scope)
+            self.assertEqual(response.status_code, 200, response.text)
+            found = {item['key'] for item in response.json()['files']}
+            self.assertTrue({'Ability/Temp/MonsterAbilities/UnrelatedFilename.json',
+                             'Gadget/ConfigGadget_UnrelatedTurret.json', 'Ability/Misc/Followup.json'} <= found)
+            self.assertNotIn('Ability/Misc/Other.json', found)
+            self.assertNotIn('Monster/Hili_None_010.json', found)
+            self.assertNotIn('Monster/Variant_210101010.json', found)
+            if 'enemy_id' in scope:
+                self.assertTrue({'Monster/ConfigMonster_Hili_None_01.json', 'Monster/21010101.json',
+                                 'Monster/Variant_21010101.json'} <= found)
+            self.assertTrue(any('Could not index Malformed.json' in warning for warning in response.json()['warnings']))
+            for key in found:
+                self.assertEqual(self.client.get('/api/binoutput/file', params={'path': key, **scope}).status_code, 200)
+            self.assertEqual(self.client.get('/api/binoutput/file',
+                                            params={'path': 'Ability/Misc/Other.json', **scope}).status_code, 404)
+        found = self.client.get('/api/binoutput/references', params={'character_id': 10000021}).json()['files']
+        self.assertIn('Ability/Temp/AvatarAbilities/ConfigAbility_Avatar_Renamed.json', {item['key'] for item in found})
+        (root / 'Ability' / 'Misc' / 'Followup.json').write_text(json.dumps([
+            {'Default': {'abilityName': 'Renamed_Followup', 'modifiers': {}}},
+        ]), encoding='utf-8')
+        refreshed = self.client.get('/api/binoutput/references', params={'enemy_id': 21010101}).json()
+        self.assertNotIn('Ability/Misc/Followup.json', {item['key'] for item in refreshed['files']})
+        self.assertTrue(any('no definition' in warning for warning in refreshed['warnings']))
+
+    def test_binoutput_gadget_definitions_dependencies_and_scope(self):
+        excel = self.dataset / 'MappedExcelBinOutput_EN'
+        (excel / 'GadgetExcelConfigData.json').write_text(json.dumps([
+            {'Id': 1, 'JsonName': 'Arrow', 'Type': 'Bullet'},
+            {'Id': 2, 'JsonName': 'Explosion', 'Type': 'Field'},
+            {'Id': 3, 'Type': 'Gadget'}, {'Id': 4, 'JsonName': 'Missing'},
+        ]), encoding='utf-8')
+        root = self.dataset / 'BinOutput'
+        files = {
+            'Gadget/Shared.json': {
+                'Arrow': {'abilities': [{'abilityName': 'Arrow_Ability'}]},
+                'Unrelated': {'abilities': [{'abilityName': 'Unrelated_Ability'}]},
+            },
+            'Gadget/OtherShared.json': {
+                'Explosion': {'abilities': [{'abilityName': 'Explosion_Ability'}]},
+                'AnotherUnrelated': {'abilities': [{'abilityName': 'Unrelated_Ability'}]},
+            },
+            'Ability/Arrow.json': [{'Default': {'abilityName': 'Arrow_Ability', 'onAdded': [
+                {'gadgetID': 2}, {'gadgetId': 1}, {'gadgetIDs': [999, 0]},
+            ]}}],
+            'Ability/Explosion.json': [{'Default': {'abilityName': 'Explosion_Ability',
+                                                    'onAdded': [{'gadgetIds': [1]}]}}],
+            'Ability/Unrelated.json': [{'Default': {'abilityName': 'Unrelated_Ability', 'modifiers': {}}}],
+        }
+        for relative, value in files.items():
+            path = root.joinpath(*relative.split('/'))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(value), encoding='utf-8')
+        (root / 'Gadget' / 'Broken.json').write_text('{broken', encoding='utf-8')
+        picker = self.client.get('/api/gadgets')
+        self.assertEqual(picker.status_code, 200, picker.text)
+        self.assertIn({'id': 1, 'name': 'Arrow', 'internal': 'Bullet'}, picker.json())
+        scope = {'gadget_id': 1}
+        response = self.client.get('/api/binoutput/references', params=scope)
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result['character'], 'Arrow')
+        self.assertEqual(result['files'][0]['relative'], 'Gadget/Shared.json')
+        self.assertEqual({item['relative'] for item in result['files']}, {
+            'Gadget/Shared.json', 'Gadget/OtherShared.json', 'Ability/Arrow.json', 'Ability/Explosion.json',
+        })
+        self.assertTrue(any('Could not index Broken.json' in warning for warning in result['warnings']))
+        self.assertTrue(any('1 referenced gadget IDs' in warning for warning in result['warnings']))
+        for item in result['files']:
+            self.assertEqual(self.client.get('/api/binoutput/file',
+                                            params={'path': item['relative'], **scope}).status_code, 200)
+        self.assertEqual(self.client.get('/api/binoutput/file',
+                                        params={'path': 'Ability/Unrelated.json', **scope}).status_code, 404)
+        for params in ({'character_id': 10000021, **scope}, {'enemy_id': 1, **scope}):
+            self.assertEqual(self.client.get('/api/binoutput/references', params=params).status_code, 422)
+            self.assertEqual(self.client.get('/api/binoutput/file',
+                                            params={'path': 'Gadget/Shared.json', **params}).status_code, 422)
+        for identifier in (3, 4):
+            result = self.client.get('/api/binoutput/references', params={'gadget_id': identifier}).json()
+            self.assertEqual(result['files'], [])
+            self.assertTrue(result['warnings'])
+        self.assertEqual(self.client.get('/api/binoutput/references', params={'gadget_id': 999}).status_code, 409)
+        self.assertEqual(self.client.get('/api/binoutput/references', params={'gadget_id': 0}).status_code, 422)
+        (root / 'Gadget' / 'Shared.json').write_text('{"Renamed": {}}', encoding='utf-8')
+        refreshed = self.client.get('/api/binoutput/references', params=scope).json()
+        self.assertEqual(refreshed['files'], [])
+        self.assertTrue(any('No Gadget config' in warning for warning in refreshed['warnings']))
+
+    def test_binoutput_gadget_raw_ids_survive_text_mapping(self):
+        mapped = self.dataset / 'MappedExcelBinOutput_EN' / 'GadgetExcelConfigData.json'
+        mapped.write_text(json.dumps([{'Id': 'Accidentally mapped text', 'JsonName': 'Arrow'}]), encoding='utf-8')
+        self.assertEqual(self.client.get('/api/gadgets').status_code, 409)
+        raw = self.dataset / 'ExcelBinOutput'
+        raw.mkdir()
+        (raw / 'GadgetExcelConfigData.json').write_text(json.dumps([
+            {'id': 42, 'jsonName': 'Arrow', 'type': 'Bullet'},
+        ]), encoding='utf-8')
+        folder = self.dataset / 'BinOutput' / 'Gadget'
+        folder.mkdir(parents=True)
+        (folder / 'Shared.json').write_text('{"Arrow": {}}', encoding='utf-8')
+        self.assertEqual(self.client.get('/api/gadgets').json(), [
+            {'id': 42, 'name': 'Arrow', 'internal': 'Bullet'},
+        ])
+        response = self.client.get('/api/binoutput/references', params={'gadget_id': 42})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([item['relative'] for item in response.json()['files']], ['Gadget/Shared.json'])
+
     def test_attribute_scaling_job(self):
         excel = self.dataset / 'MappedExcelBinOutput_EN'
         for name in ('AvatarTalentExcelConfigData', 'ChapterExcelConfigData', 'CombineExcelConfigData', 'FettersExcelConfigData',
@@ -653,6 +936,7 @@ class WebTests(unittest.TestCase):
         job = self.wait(response.json()['id'])
         self.assertEqual(job['status'], 'succeeded', self.client.get(f"/api/jobs/{job['id']}/logs").text)
         files = ['1 - Sharpshooter.wikitext', '2 - Sprint.wikitext', '3 - Fiery Rain.wikitext']
+        self.assertNotIn('Saved abilities_', self.client.get(f"/api/jobs/{job['id']}/logs").json()['text'])
         self.assertEqual(sorted(file['path'] for file in job['files']), files)
         attack, sprint, burst = (self.client.get(f"/api/jobs/{job['id']}/preview/{name}").json()['text'] for name in files)
         self.assertTrue(attack.startswith('{{Talent Scaling\n|levels=2\n'))
@@ -680,12 +964,18 @@ class WebTests(unittest.TestCase):
         directory = root / job.id
         directory.mkdir(parents=True)
         (directory / 'job.json').write_text(job.model_dump_json(), encoding='utf-8')
+        (directory / 'progress.json').write_text(json.dumps({
+            'stage': 'Writing pages', 'completed': 2, 'total': 5, 'warnings': 2,
+        }), encoding='utf-8')
         manager = JobManager(self.config, root)
         self.addCleanup(manager.close)
         recovered = manager.get(job.id)
         self.assertEqual(recovered.status, 'failed')
         self.assertIn('server stopped', recovered.error)
         self.assertIsNotNone(recovered.finished_at)
+        self.assertEqual((recovered.progress.stage, recovered.progress.warnings), ('Failed', 2))
+        self.assertIsNone(recovered.progress.total)
+        self.assertIn('ERROR   The server stopped', (directory / 'log.txt').read_text())
 
     def test_character_kit_files_in_kit_order(self):
         root = self.root / 'ordering'
@@ -731,6 +1021,11 @@ class WebTests(unittest.TestCase):
         job = self.wait(response.json()['id'])
         self.assertEqual(job['status'], 'succeeded', self.client.get(f"/api/jobs/{job['id']}/logs").text)
         self.assertTrue((self.dataset / 'MappedToID' / 'AvatarExcelConfigData.json').is_file())
+        log = self.client.get(f"/api/jobs/{job['id']}/logs").json()['text']
+        self.assertGreater(job['progress']['warnings'], 0)
+        self.assertIn('WARNING ', log)
+        self.assertNotIn('Replacements completed and saved', log)
+        self.assertNotRegex(log, r'\[\d+:\d+\] INFO +\[\d+:\d+\]')
         self.assertEqual(self.client.get('/api/characters').json()[0]['name'], 'Amber')
         self.assertFalse((self.root / 'existing-output').exists())
 

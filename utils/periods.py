@@ -2,6 +2,7 @@
 schedule tables. Shared by the tools and the web API, which lists them for the form (newest first).'''
 import re
 from datetime import datetime, timedelta
+import toolLog as report
 
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 # A rotation runs from 04:00 on its start day until 03:59:59 on the next one's, which the wiki shows as the day before.
@@ -94,8 +95,8 @@ def wiki_version(date):
     try:
         version = date_versions([date]).get(date, '')
     except (OSError, ValueError) as error:
-        print(f'Could not look up the version for {date} on the wiki: {error}', flush=True)
+        report.warning(f'Could not look up the version for {date} on the wiki: {error}')
         return ''
     if version:
-        print(f'Version from the wiki\'s Date to Version for {date}: {version}', flush=True)
+        report.info(f'Version from the wiki\'s Date to Version for {date}: {version}')
     return version

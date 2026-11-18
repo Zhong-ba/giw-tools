@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from getConfig import CONFIG
+import toolLog as report
 from utils.pageinfo import pageinfo
 from utils.periods import DAY_START, TIME_FORMAT, opening as _opening, rotations as _rotations, wiki_version
 
@@ -199,9 +200,10 @@ def abyss_page(start=None, version=''):
 
 def write_abyss_page(start=None, version='', directory=None):
     '''Writes the rotation's page to directory (default OutputPath) and returns its path.'''
+    report.stage(f'Building Spiral Abyss rotation: {start or "latest"}')
     title, text = abyss_page(start, version)
     path = Path(directory or CONFIG.OUTPUT_PATH) / f'{title.replace("/", " ")}.wikitext'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding='utf-8')
-    print(f'Wrote {title} to {path}.', flush=True)
+    report.info(f'Wrote {title} to {path.name}.')
     return path
