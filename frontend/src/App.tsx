@@ -1120,6 +1120,16 @@ function App() {
     return () => { controller.abort(); clearTimeout(initial); clearInterval(timer) }
   }, [refresh])
   useEffect(() => {
+    const syncToolFromPath = () => {
+      const path = window.location.pathname.replace(/\/+$/, '')
+      const tool = tools.find(item => path === `/${item.id}`) ?? null
+      setSelectedTool(current => current?.id === tool?.id ? current : tool)
+    }
+    window.addEventListener('popstate', syncToolFromPath)
+    syncToolFromPath()
+    return () => window.removeEventListener('popstate', syncToolFromPath)
+  }, [tools])
+  useEffect(() => {
     if (!picksCharacter(selectedTool)) return
     const controller = new AbortController()
     api<Character[]>('/characters', { signal: controller.signal }).then(setCharacters)
@@ -1131,7 +1141,7 @@ function App() {
     setSubmitting(true); setFormError('')
     try {
       const job = await api<Job>('/jobs', { method: 'POST', body: JSON.stringify({ tool_id: selectedTool.id, parameters }) })
-      setSelectedTool(null); setSelectedJob(job.id); setJobs(previous => [job, ...previous]); void refresh()
+      closeTool(); setSelectedJob(job.id); setJobs(previous => [job, ...previous]); void refresh()
     } catch (reason) { setFormError(message(reason)) }
     finally { setSubmitting(false) }
   }
@@ -1166,7 +1176,16 @@ function App() {
   const openTool = (tool: Tool) => {
     setFormError('')
     if (picksCharacter(tool)) { setCharacterError(''); setCharacters([]) }
+    const path = `/${tool.id}`
+    if (window.location.pathname !== path) window.history.pushState({ painmeloToolId: tool.id }, '', path)
     setSelectedTool(tool)
+  }
+  const closeTool = () => {
+    const tool = selectedTool
+    setSelectedTool(null)
+    if (!tool || window.location.pathname.replace(/\/+$/, '') !== `/${tool.id}`) return
+    if (window.history.state?.painmeloToolId === tool.id) window.history.back()
+    else window.history.replaceState(null, '', '/')
   }
   const currentJob = jobs.find(job => job.id === selectedJob)
   const activeJobs = jobs.filter(active)
@@ -1252,10 +1271,10 @@ function App() {
       </main>
     </div>
     {selectedTool && (selectedTool.id === 'other-languages'
-      ? <Dialog title={selectedTool.name} subtitle={selectedTool.description} wide onClose={() => setSelectedTool(null)}><OtherLanguages /></Dialog>
+      ? <Dialog title={selectedTool.name} subtitle={selectedTool.description} wide onClose={closeTool}><OtherLanguages /></Dialog>
       : selectedTool.id === 'binoutput-viewer'
-        ? <Dialog title={selectedTool.name} subtitle={selectedTool.description} wide onClose={() => setSelectedTool(null)}><BinOutputViewer characters={characters} /></Dialog>
-      : <ToolForm key={selectedTool.id} tool={selectedTool} characters={characters} characterError={characterError} submitting={submitting} error={formError} onSubmit={parameters => { void run(parameters) }} onClose={() => setSelectedTool(null)} />)}
+        ? <Dialog title={selectedTool.name} subtitle={selectedTool.description} wide onClose={closeTool}><BinOutputViewer characters={characters} /></Dialog>
+      : <ToolForm key={selectedTool.id} tool={selectedTool} characters={characters} characterError={characterError} submitting={submitting} error={formError} onSubmit={parameters => { void run(parameters) }} onClose={closeTool} />)}
     {currentJob && <JobDialog key={currentJob.id} job={currentJob} onClose={() => setSelectedJob(null)} onDelete={() => deleteJob(currentJob)}
       onQueued={open => { void refresh(); if (open) { setSelectedJob(null); setPage('bot') } }} />}
     {pendingDelete && <Dialog title={pendingDelete.length === 1 ? 'Delete Job?' : `Delete ${pendingDelete.length} Jobs?`} expandable={false} onClose={() => { if (!deleting) setPendingDelete(null) }}>
