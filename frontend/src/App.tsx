@@ -51,7 +51,6 @@ function readToolUrl(tool: Tool, search: string) {
       if (params.has(key)) invalid.push(key)
       continue
     }
-    if (params.has(key)) provided.push(key)
     const raw = params.getAll(key)
     if (!raw.length) continue
     const type = propertyType(property)
@@ -95,6 +94,7 @@ function readToolUrl(tool: Tool, search: string) {
       continue
     }
     values[key] = value
+    provided.push(key)
   }
   return { values, invalid, provided }
 }
@@ -106,8 +106,7 @@ function writeToolUrl(tool: Tool, values: Parameters, touched: Set<string>) {
     if (urlExcludedFields.has(key)) continue
     const value = values[key]
     if (JSON.stringify(value) === JSON.stringify(propertyDefault(property))) {
-      if (Array.isArray(value) && !value.length && touched.has(key)) url.searchParams.append(key, '')
-      continue
+      if (!touched.has(key)) continue
     }
     if (Array.isArray(value)) {
       if (!value.length) url.searchParams.append(key, '')
@@ -374,7 +373,7 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
 }) {
   const [urlState] = useState(() => readToolUrl(tool, window.location.search))
   const [values, setValues] = useState<Parameters>(() => urlState.values)
-  const [touched, setTouched] = useState<Set<string>>(() => new Set())
+  const overrides = useRef(new Set(urlState.provided))
   const urlWarning = urlState.invalid.length
     ? `Ignored invalid or non-shareable URL value(s) for: ${urlState.invalid.join(', ')}.` : ''
   const [characterSearch, setCharacterSearch] = useState('')
@@ -382,7 +381,7 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
   const autoVersion = useRef('')
   const characterId = values.character_id
   const fillsVersion = 'version' in tool.schema.properties && 'character_id' in tool.schema.properties
-  useEffect(() => { writeToolUrl(tool, values, touched) }, [tool, values, touched])
+  useEffect(() => { writeToolUrl(tool, values, overrides.current) }, [tool, values])
   useEffect(() => {
     if (!fillsVersion || typeof characterId !== 'number') return
     const controller = new AbortController()
@@ -392,7 +391,7 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
       .then(result => {
         if (!result.version) { setVersionNote(`No Change History found for ${result.character} on the wiki.`); return }
         setValues(previous => {
-          if (previous.version !== '' && previous.version !== autoVersion.current) return previous
+          if (overrides.current.has('version') || previous.version !== '' && previous.version !== autoVersion.current) return previous
           autoVersion.current = result.version ?? ''
           return { ...previous, version: result.version ?? '' }
         })
@@ -401,7 +400,7 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
       .catch(reason => { if (!controller.signal.aborted) setVersionNote(`Could not check the wiki: ${message(reason)}`) })
     return () => { clearTimeout(start); controller.abort() }
   }, [fillsVersion, characterId, characters])
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(() => urlState.provided.some(key => advanced.has(key)))
   const [passiveNote, setPassiveNote] = useState('')
   const detectsPassives = passiveTypes.every(key => key in tool.schema.properties) && 'character_id' in tool.schema.properties
   useEffect(() => {
@@ -409,7 +408,9 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
     const controller = new AbortController()
     api<{ types: string[] }>(`/characters/${characterId}/passives`, { signal: controller.signal })
       .then(({ types }) => {
-        setValues(previous => ({ ...previous, ...Object.fromEntries(passiveTypes.map(key => [key, types.includes(key)])) }))
+        if (controller.signal.aborted) return
+        setValues(previous => ({ ...previous, ...Object.fromEntries(passiveTypes
+          .filter(key => !overrides.current.has(key)).map(key => [key, types.includes(key)])) }))
         const titles = types.map(key => tool.schema.properties[key]?.title ?? key)
         setPassiveNote(titles.length ? `Detected ${titles.join(', ')} passive.` : '')
         if (types.length) setAdvancedOpen(true)
@@ -418,12 +419,12 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
     return () => controller.abort()
   }, [detectsPassives, characterId, tool])
   const update = (key: string, value: Parameters[string]) => {
-    setTouched(previous => new Set(previous).add(key))
+    overrides.current.add(key)
     setValues(previous => ({ ...previous, [key]: value }))
   }
   // Fills the version unless the user typed their own.
   const autofillVersion = useCallback((version: string) => setValues(previous => {
-    if (previous.version !== '' && previous.version !== autoVersion.current) return previous
+    if (overrides.current.has('version') || previous.version !== '' && previous.version !== autoVersion.current) return previous
     autoVersion.current = version
     return { ...previous, version }
   }), [])
@@ -472,11 +473,11 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
         </select>
         {characterError && <small className="field-error" role="alert">{characterError}</small>}
       </>       : pickers[key] ? <ItemPicker config={pickers[key]} value={Array.isArray(values[key]) ? values[key].map(Number) : []}
-        preserveSelection={urlState.provided.includes(key) || touched.has(key)}
+        preserveSelection={urlState.provided.includes(key)}
         onChange={value => update(key, value)} onVersion={autofillVersion} />
       : property.periods ? <PeriodPicker label={property.title} kind={property.periods}
         value={Array.isArray(values[key]) ? values[key].map(String) : []}
-        preserveSelection={urlState.provided.includes(key) || touched.has(key)} onChange={value => update(key, value)} />
+        preserveSelection={urlState.provided.includes(key)} onChange={value => update(key, value)} />
       : property.enum ? <select id={key} required={required} value={String(values[key] ?? '')}
         onChange={event => update(key, event.target.value)}>
         {property.enum.map(option => <option key={option} value={option}>{option}</option>)}

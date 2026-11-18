@@ -1,18 +1,40 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Braces, Check, ChevronRight, Copy, FileText, FolderOpen, LoaderCircle, Search, X } from 'lucide-react'
-import { api, message } from './api'
+import { api, datasetChoice, message } from './api'
 import type { Character, PickerItem } from './api'
 import { cleanFloat32, findJson, JSON_HIGHLIGHTS, sortKeys } from './json'
 import { JsonView } from './JsonView'
 import type { JsonHit } from './JsonView'
 import { useFindShortcut } from './search'
 import { SearchBar } from './SearchBar'
+import { updateToolQuery } from './toolUrl'
 
 interface ReferenceFile { key: string; relative: string; group: string; name: string; size: number; reasons: string[]; legacyKey?: string }
 interface References { character: string; files: ReferenceFile[]; warnings: string[] }
 interface TreeEntry { key: string; name: string; directory: boolean; size: number | null }
 type Source = { kind: 'all' } | { kind: 'character' | 'enemy' | 'gadget'; id: number } | { kind: 'job'; id: string }
 type Filter = 'all' | 'attackInfo' | 'elemBall'
+const publicScopes = ['character', 'enemy', 'gadget'] as const
+const defaultHighlights = JSON_HIGHLIGHTS.map(rule => rule.id)
+const toolId = 'binoutput-viewer'
+const filenameTerms = (name: string) => name.trim().toLowerCase().split(/\s+/).filter(Boolean)
+
+function readViewerLink(jobId?: string) {
+  const params = new URLSearchParams(jobId ? '' : location.search)
+  const scope = publicScopes.flatMap(kind => {
+    const raw = params.get(`${kind}_id`)
+    const id = Number(raw)
+    return raw && /^\d+$/.test(raw) && Number.isSafeInteger(id) && id > 0 ? [{ kind, id }] : []
+  })[0]
+  const rawFilter = params.get('filter')
+  const filter: Filter = rawFilter === 'attackInfo' || rawFilter === 'elemBall' ? rawFilter : 'all'
+  const path = params.get('path') ?? ''
+  const highlights = params.get('highlights')
+  return { scope, path: path.length <= 4096 ? path : '', name: (params.get('name') ?? '').slice(0, 120),
+    filter,
+    cleanDecimals: params.get('clean_decimals') !== 'false',
+    highlights: highlights === null ? defaultHighlights : defaultHighlights.filter(id => highlights.split(',').includes(id)) }
+}
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const filters: { id: Exclude<Filter, 'all'>; label: string; title: string; field: string
   pick: (key: string | null, value: unknown) => unknown }[] = [
@@ -175,13 +197,18 @@ function Directory({ path, name, selected, expanded, load, onSelect }: {
   </div>
 }
 
-function Browser({ source, highlights, cleanDecimals }: { source: Source; highlights: string[]; cleanDecimals: boolean }) {
+function Browser({ source, highlights, cleanDecimals, link, listings }: {
+  source: Source; highlights: string[]; cleanDecimals: boolean
+  link?: ReturnType<typeof readViewerLink>; listings: Map<string, TreeEntry[]>
+}) {
   const [references, setReferences] = useState<References | null>(null)
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState(link?.path ?? '')
   const [text, setText] = useState('')
-  const [filter, setFilter] = useState<Filter>('all')
-  const [loading, setLoading] = useState(source.kind !== 'all')
+  const [filter, setFilter] = useState<Filter>(link?.filter ?? 'all')
+  const [loading, setLoading] = useState(source.kind !== 'all' || !!link?.path)
   const [error, setError] = useState('')
+  const [filename, setFilename] = useState(link?.name ?? '')
+  const [foundNames, setFoundNames] = useState<{ term: string; entries: { key: string; name: string }[]; truncated: boolean; error?: string }>()
   const [copiedMode, setCopiedMode] = useState<boolean | null>(null)
   const [focus, setFocus] = useState<{ line: number } | null>(null)
   const [searching, setSearching] = useState(false)
@@ -192,6 +219,36 @@ function Browser({ source, highlights, cleanDecimals }: { source: Source; highli
   const jobId = source.kind === 'job' ? source.id : null
   const legacyKey = references?.files.find(file => file.key === selected)?.legacyKey
   const related = source.kind !== 'all'
+  const linkedPath = link?.path ?? ''
+  const term = filename.trim()
+  useEffect(() => {
+    if (!link) return
+    updateToolQuery(toolId, { path: selected || undefined, name: term || undefined, filter: filter === 'all' ? undefined : filter })
+  }, [link, selected, filter, term])
+  useEffect(() => {
+    if (!term || related) return
+    const controller = new AbortController()
+    const start = setTimeout(() => {
+      api<{ entries: { key: string; name: string }[]; truncated: boolean }>(
+        `/binoutput/search?${new URLSearchParams({ name: term })}`, { signal: controller.signal },
+      ).then(result => { if (!controller.signal.aborted) setFoundNames({ ...result, term }) })
+        .catch(reason => {
+          if (!controller.signal.aborted) setFoundNames({ term, entries: [], truncated: false, error: message(reason) })
+        })
+    }, 250)
+    return () => { clearTimeout(start); controller.abort() }
+  }, [term, related])
+  const nameResults = useMemo(() => {
+    if (!term) return undefined
+    if (!related) return foundNames?.term === term ? foundNames : undefined
+    if (!references) return undefined
+    const terms = filenameTerms(term)
+    const entries = references.files.flatMap(file => {
+      const name = file.key.split('/').pop() ?? file.name
+      return terms.every(part => name.toLowerCase().includes(part)) ? [{ key: file.key, name }] : []
+    })
+    return { entries: entries.slice(0, 100), truncated: entries.length > 100, error: undefined }
+  }, [term, related, foundNames, references])
   useEffect(() => {
     if (!related) return
     const controller = new AbortController()
@@ -199,13 +256,19 @@ function Browser({ source, highlights, cleanDecimals }: { source: Source; highli
     api<References>(endpoint, { signal: controller.signal }).then(result => {
       if (controller.signal.aborted) return
       setReferences({ ...result, files: result.files.map(file => ({ ...file, key: file.relative, legacyKey: jobId ? file.key : undefined })) })
-      setSelected(result.files[0]?.relative ?? '')
-      if (!result.files.length) setLoading(false)
+      if (linkedPath && !result.files.some(file => file.relative === linkedPath)) {
+        setError('The linked file is not available in this scope.')
+        setLoading(false)
+      } else {
+        setSelected(linkedPath || result.files[0]?.relative || '')
+        if (!result.files.length) setLoading(false)
+      }
     }).catch(reason => { if (!controller.signal.aborted) { setError(message(reason)); setLoading(false) } })
     return () => controller.abort()
-  }, [jobId, queryString, related])
+  }, [jobId, queryString, related, linkedPath])
+  const canLoadFile = !related || !!references?.files.some(file => file.key === selected)
   useEffect(() => {
-    if (!selected) return
+    if (!selected || !canLoadFile) return
     const controller = new AbortController()
     const endpoint = jobId ? `/jobs/${jobId}/references/${encodePath(legacyKey ?? selected)}`
       : `/binoutput/file?path=${encodeURIComponent(selected)}${queryString ? `&${queryString}` : ''}`
@@ -213,7 +276,7 @@ function Browser({ source, highlights, cleanDecimals }: { source: Source; highli
       .catch(reason => { if (!controller.signal.aborted) setError(message(reason)) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [jobId, selected, queryString, legacyKey])
+  }, [jobId, selected, queryString, legacyKey, canLoadFile])
   const tree = useMemo(() => {
     const result = new Map<string, Map<string, TreeEntry>>()
     result.set('', new Map())
@@ -228,7 +291,17 @@ function Browser({ source, highlights, cleanDecimals }: { source: Source; highli
     return result
   }, [references])
   const load = useCallback(async (path: string, signal: AbortSignal) => {
-    if (!related) return (await api<{ entries: TreeEntry[] }>(`/binoutput/tree?path=${encodeURIComponent(path)}`, { signal })).entries
+    if (!related) {
+      const key = `${datasetChoice() ?? ''}:${path}`
+      const cached = listings.get(key)
+      if (cached) return cached
+      const { entries } = await api<{ entries: TreeEntry[] }>(`/binoutput/tree?path=${encodeURIComponent(path)}`, { signal })
+      if (!signal.aborted) {
+        if (listings.size >= 64) listings.clear()
+        listings.set(key, entries)
+      }
+      return entries
+    }
     return [...(tree.get(path)?.values() ?? [])].map(entry => {
       let compact = entry
       while (compact.directory) {
@@ -238,7 +311,7 @@ function Browser({ source, highlights, cleanDecimals }: { source: Source; highli
       }
       return compact
     }).sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name))
-  }, [related, tree])
+  }, [related, tree, listings])
   const parsed = useMemo(() => {
     if (!text) return { value: undefined, error: '' }
     try { return { value: JSON.parse(text) as unknown, error: '' } }
@@ -304,7 +377,19 @@ function Browser({ source, highlights, cleanDecimals }: { source: Source; highli
   return <div className="binoutput-layout">
     <aside className="binoutput-tree" aria-label="BinOutput File Tree">
       <div className="binoutput-tree-title">{related ? `${references?.character ?? 'Relevant Files'}${references ? ` (${references.files.length})` : ''}` : 'BinOutput'}</div>
-      {(!related || references) && <Directory path="" name="BinOutput" selected={selected} expanded={related} load={load} onSelect={chooseFile} />}
+      <label className="field"><span>Filter by Filename</span>
+        <input type="search" value={filename} maxLength={120} onChange={event => setFilename(event.target.value)} />
+      </label>
+      {term ? nameResults?.error ? <div className="error-box" role="alert">{nameResults.error}</div>
+        : !nameResults ? <span className="muted" role="status">{related && error ? 'Could not load filenames.' : 'Searching filenames...'}</span>
+        : <>
+          {!nameResults.entries.length && <span className="muted" role="status">No matching filenames.</span>}
+          {nameResults.entries.map(entry => <button key={entry.key} className={`binoutput-file${selected === entry.key ? ' selected' : ''}`}
+            aria-current={selected === entry.key ? 'true' : undefined} onClick={() => chooseFile(entry.key)} title={entry.key}>
+            <FileText size={13} /><span>{entry.key}</span>
+          </button>)}
+          {nameResults.truncated && <span className="muted" role="status">Showing the first 100 matches. Refine the filename to narrow results.</span>}
+        </> : (!related || references) && <Directory path="" name="BinOutput" selected={selected} expanded={related} load={load} onSelect={chooseFile} />}
       {references && references.warnings.length > 0 && <details className="binoutput-warnings"><summary>Discovery Notes ({references.warnings.length})</summary>
         <ul>{references.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
       </details>}
@@ -339,18 +424,35 @@ function Browser({ source, highlights, cleanDecimals }: { source: Source; highli
 export function BinOutputViewer({ jobId, onClose, characters: initialCharacters = [] }: {
   jobId?: string; onClose?: () => void; characters?: Character[]
 }) {
-  const [mode, setMode] = useState<'all' | 'character' | 'enemy' | 'gadget' | 'job'>(jobId ? 'job' : 'all')
-  const [character, setCharacter] = useState('')
-  const [enemy, setEnemy] = useState('')
-  const [gadget, setGadget] = useState('')
+  const [initial] = useState(() => readViewerLink(jobId))
+  const [link, setLink] = useState(initial)
+  const [listings] = useState(() => new Map<string, TreeEntry[]>())
+  const [mode, setMode] = useState<'all' | 'character' | 'enemy' | 'gadget' | 'job'>(jobId ? 'job' : initial.scope?.kind ?? 'all')
+  const linkedId = (kind: typeof publicScopes[number]) => initial.scope?.kind === kind ? String(initial.scope.id) : ''
+  const [character, setCharacter] = useState(() => linkedId('character'))
+  const [enemy, setEnemy] = useState(() => linkedId('enemy'))
+  const [gadget, setGadget] = useState(() => linkedId('gadget'))
   const [characters, setCharacters] = useState(initialCharacters)
   const [enemies, setEnemies] = useState<PickerItem[] | null>(null)
   const [gadgets, setGadgets] = useState<PickerItem[] | null>(null)
   const [error, setError] = useState('')
-  const [highlights, setHighlights] = useState(JSON_HIGHLIGHTS.map(rule => rule.id))
-  const [cleanDecimals, setCleanDecimals] = useState(true)
+  const [highlights, setHighlights] = useState(initial.highlights)
+  const [cleanDecimals, setCleanDecimals] = useState(initial.cleanDecimals)
   const scopeId = useId()
   const characterMode = mode === 'character' || mode === 'job'
+  const scopeValue = mode === 'character' ? character : mode === 'enemy' ? enemy : mode === 'gadget' ? gadget : ''
+  const highlightParam = defaultHighlights.filter(id => highlights.includes(id)).join(',')
+  useEffect(() => {
+    if (jobId) return
+    updateToolQuery(toolId, { character_id: mode === 'character' ? scopeValue || undefined : undefined,
+      enemy_id: mode === 'enemy' ? scopeValue || undefined : undefined, gadget_id: mode === 'gadget' ? scopeValue || undefined : undefined,
+      clean_decimals: cleanDecimals ? undefined : 'false',
+      highlights: highlightParam === defaultHighlights.join(',') ? undefined : highlightParam })
+  }, [jobId, mode, scopeValue, cleanDecimals, highlightParam])
+  const resetFileLink = () => {
+    setLink({ ...initial, path: '', name: '', filter: 'all' })
+    if (!jobId) updateToolQuery(toolId, { path: undefined, name: undefined, filter: undefined })
+  }
   useEffect(() => {
     if (mode === 'all' || characterMode && characters.length || mode === 'enemy' && enemies || mode === 'gadget' && gadgets) return
     const controller = new AbortController()
@@ -383,17 +485,21 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
         {(['all', 'character', 'enemy', 'gadget'] as const).map(value => <label key={value}>
           <input type="radio" name={`${scopeId}-scope`} value={value}
             checked={value === 'character' ? characterMode : mode === value} onChange={() => {
-              setError(''); setMode(value === 'character' && jobId && !character ? 'job' : value)
+              resetFileLink(); setError(''); setMode(value === 'character' && jobId && !character ? 'job' : value)
             }} />{value === 'all' ? 'None' : value === 'character' ? 'Character' : value === 'enemy' ? 'Enemy' : 'Gadget'}
         </label>)}
       </div>
       {characterMode && <FilterPicker label="Character" value={mode === 'job' ? 'job' : character}
         options={characterOptions} onChange={value => {
         if (value === 'job') setMode('job')
-        else { setCharacter(value); setMode('character') }
+        else if (value !== character || mode !== 'character') { resetFileLink(); setCharacter(value); setMode('character') }
       }} />}
-      {mode === 'enemy' && <FilterPicker label="Enemy" value={enemy} options={enemyOptions} onChange={setEnemy} />}
-      {mode === 'gadget' && <FilterPicker label="Gadget" value={gadget} options={gadgetOptions} onChange={setGadget} />}
+      {mode === 'enemy' && <FilterPicker label="Enemy" value={enemy} options={enemyOptions} onChange={value => {
+        if (value !== enemy) { resetFileLink(); setEnemy(value) }
+      }} />}
+      {mode === 'gadget' && <FilterPicker label="Gadget" value={gadget} options={gadgetOptions} onChange={value => {
+        if (value !== gadget) { resetFileLink(); setGadget(value) }
+      }} />}
       <label title="Remove float32 extraction noise from displayed and copied numbers without changing the source files.">
         <input type="checkbox" checked={cleanDecimals} onChange={event => setCleanDecimals(event.target.checked)} />Clean Decimals
       </label>
@@ -407,7 +513,8 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
       {onClose && <button className="icon-button" onClick={onClose} aria-label="Hide game data" title="Hide game data"><X size={16} /></button>}
     </div>
     {error && <div className="error-box" role="alert">{error}</div>}
-    {source ? <Browser key={JSON.stringify(source)} source={source} highlights={highlights} cleanDecimals={cleanDecimals} /> :
+    {source ? <Browser key={JSON.stringify(source)} source={source} highlights={highlights} cleanDecimals={cleanDecimals}
+      link={jobId ? undefined : link} listings={listings} /> :
       <div className="empty"><Braces size={28} /><p>Select {mode === 'enemy' ? 'an' : 'a'} {mode} to find its BinOutput files.</p></div>}
   </section>
 }

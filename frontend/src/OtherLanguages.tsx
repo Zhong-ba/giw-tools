@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, ChevronRight, CircleAlert, Copy, LoaderCircle } from 'lucide-react'
 import { api, message } from './api'
 import type { LanguageResult } from './api'
 import { findMatches, markMatches } from './search'
 import { highlightWikitext } from './wikitext'
+import { updateToolQuery } from './toolUrl'
 
 const languages = ['CHS', 'CHT', 'DE', 'EN', 'ES', 'FR', 'ID', 'JP', 'KR', 'PT', 'RU', 'TH', 'VI', 'TR', 'IT']
 
@@ -55,34 +55,50 @@ function ResultCard({ result, query, translation, romanization, header }: {
 }
 
 export function OtherLanguages() {
-  const [text, setText] = useState('')
-  const [language, setLanguage] = useState('EN')
-  const [translation, setTranslation] = useState(true)
-  const [romanization, setRomanization] = useState(true)
-  const [header, setHeader] = useState(false)
+  const [initial] = useState(() => {
+    const params = new URLSearchParams(location.search)
+    const query = params.get('q')?.trim() ?? ''
+    const language = params.get('input_lang') ?? 'EN'
+    return { query: query.length <= 200 ? query : '', language: languages.includes(language) ? language : 'EN',
+      translation: params.get('translation') !== 'false', romanization: params.get('romanization') !== 'false',
+      header: params.get('header') === 'true' }
+  })
+  const [text, setText] = useState(initial.query)
+  const [language, setLanguage] = useState(initial.language)
+  const [linked, setLinked] = useState({ query: initial.query, language: initial.language })
+  const [translation, setTranslation] = useState(initial.translation)
+  const [romanization, setRomanization] = useState(initial.romanization)
+  const [header, setHeader] = useState(initial.header)
   const [results, setResults] = useState<{ query: string; items: LanguageResult[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const request = useRef<AbortController | null>(null)
-  useEffect(() => () => request.current?.abort(), [])
-  const generate = async (event: FormEvent) => {
-    event.preventDefault()
-    const query = text.trim()
+  const generate = useCallback(async (query: string, inputLanguage: string) => {
     if (!query) { setError('Enter a name or TextMapHash.'); return }
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     setBusy(true); setError(''); setResults(null)
+    setLinked({ query: query.length <= 200 ? query : '', language: inputLanguage })
     try {
       const items = await api<LanguageResult[]>('/other-languages', {
-        method: 'POST', body: JSON.stringify({ text: query, input_lang: language }), signal: controller.signal,
+        method: 'POST', body: JSON.stringify({ text: query, input_lang: inputLanguage }), signal: controller.signal,
       })
       if (!controller.signal.aborted) setResults({ query, items })
     } catch (reason) { if (!controller.signal.aborted) setError(message(reason)) }
     finally { if (!controller.signal.aborted) setBusy(false) }
-  }
+  }, [])
+  useEffect(() => {
+    const start = setTimeout(() => { if (initial.query) void generate(initial.query, initial.language) }, 0)
+    return () => { clearTimeout(start); request.current?.abort() }
+  }, [generate, initial])
+  const linkedLanguage = linked.query ? linked.language : language
+  useEffect(() => {
+    updateToolQuery('other-languages', { q: linked.query || undefined, input_lang: linkedLanguage === 'EN' ? undefined : linkedLanguage,
+      translation: translation ? undefined : 'false', romanization: romanization ? undefined : 'false', header: header ? 'true' : undefined })
+  }, [linked.query, linkedLanguage, translation, romanization, header])
   return <div className="dialog-body ol-screen">
-    <form onSubmit={event => { void generate(event) }}>
+    <form onSubmit={event => { event.preventDefault(); void generate(text.trim(), language) }}>
       {busy && <p>The first lookup for a dataset builds its persistent index. Subsequent lookups reuse it.</p>}
       <div className="ol-query">
         <label className="field">

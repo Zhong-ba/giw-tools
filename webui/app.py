@@ -29,7 +29,7 @@ from webui.bot import BotManager, BotState, QueueItem, RelayLogin, RelayPost, Se
 from webui.datasets import parse_choice, prepared_datasets, resolve_choice
 from webui.jobs import Job, JobManager, QueueFullError
 from webui.references import (
-    binoutput_path, binoutput_tree, character_references, enemy_references, gadget_references, gadget_rows, read_reference,
+    binoutput_path, binoutput_search, binoutput_tree, character_references, enemy_references, gadget_references, gadget_rows, read_reference,
 )
 from webui.tools import TOOLS, LanguageInputs
 from webui.languages import language_results
@@ -504,6 +504,15 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
         except OSError as error:
             raise HTTPException(409, str(error)) from error
 
+    @application.get('/api/binoutput/search')
+    def search_binoutput(name: str = Query(..., min_length=1, max_length=120), config: dict = Depends(prepared)):
+        try:
+            return binoutput_search(config, name)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except OSError as error:
+            raise HTTPException(409, str(error)) from error
+
     @application.get('/api/binoutput/references')
     def binoutput_reference_list(character_id: int | None = Query(None, ge=1),
                                  enemy_id: int | None = Query(None, ge=1),
@@ -909,6 +918,12 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
         return bot(request).state()
 
     if assets.is_dir():
+        def tool_page():
+            return FileResponse(assets / 'index.html')
+
+        for tool in TOOLS.values():
+            if not tool.hidden:
+                application.add_api_route(f'/{tool.id}', tool_page, methods=['GET', 'HEAD'], include_in_schema=False)
         application.mount('/', StaticFiles(directory=assets, html=True), name='frontend')
     else:
         @application.get('/')

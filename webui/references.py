@@ -3,8 +3,10 @@ from collections import defaultdict, deque
 from functools import lru_cache
 from itertools import islice
 import json
+import os
 from pathlib import Path
 import re
+from time import monotonic
 
 from travelerKits import TRAVELER_IDS
 
@@ -59,6 +61,34 @@ def binoutput_tree(config, key=''):
         entries.append({'key': path.relative_to(root).as_posix(), 'name': ' / '.join(names),
                         'directory': directory, 'size': None if directory else path.stat().st_size})
     return {'path': key, 'entries': sorted(entries, key=lambda item: (not item['directory'], item['name'].casefold()))}
+
+
+@lru_cache(maxsize=4)
+def _binoutput_names(root: Path, refresh_window: int) -> tuple[tuple[str, str, str], ...]:
+    def fail(error: OSError) -> None:
+        raise error
+
+    entries = []
+    for folder, directories, files in os.walk(root, onerror=fail):
+        parent = Path(folder)
+        directories[:] = [name for name in directories if not (parent / name).is_symlink()
+                          and (parent / name).resolve().is_relative_to(root)]
+        for name in files:
+            path = parent / name
+            if path.suffix.lower() == '.json' and not path.is_symlink() and path.is_file():
+                entries.append((name.casefold(), path.relative_to(root).as_posix(), name))
+    return tuple(sorted(entries))
+
+
+def binoutput_search(config: dict, query: str, limit: int = 100) -> dict:
+    root = binoutput_root(config)
+    terms = query.casefold().split()
+    if not terms:
+        raise ValueError('Enter a filename to search.')
+    names = _binoutput_names(root, int(monotonic() // 300))
+    matches = islice(((key, name) for folded, key, name in names if all(term in folded for term in terms)), limit + 1)
+    results = [{'key': key, 'name': name} for key, name in matches]
+    return {'entries': results[:limit], 'truncated': len(results) > limit}
 
 
 def read_reference(item):

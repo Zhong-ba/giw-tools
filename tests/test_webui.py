@@ -724,6 +724,32 @@ class WebTests(unittest.TestCase):
         self.assertIn('without creating a job', response.text)
         self.assertEqual(self.client.get('/api/jobs').json(), [])
 
+    def test_binoutput_filename_search_matches_basename_and_caps_results(self):
+        root = self.dataset / 'BinOutput'
+        for folder in ('Avatar', 'Nested', 'SwordDirectory'):
+            (root / folder).mkdir(parents=True)
+        for index in range(101):
+            folder = 'Avatar' if index % 2 else 'Nested'
+            (root / folder / f'ConfigSword{index:03}.JSON').write_text('{}', encoding='utf-8')
+        (root / 'SwordDirectory' / 'Unrelated.json').write_text('{}', encoding='utf-8')
+        (root / 'ConfigSword.txt').write_text('{}', encoding='utf-8')
+
+        response = self.client.get('/api/binoutput/search', params={'name': 'SWORD config'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()['entries']), 100)
+        self.assertTrue(response.json()['truncated'])
+        self.assertEqual(response.json()['entries'][0], {'key': 'Nested/ConfigSword000.JSON', 'name': 'ConfigSword000.JSON'})
+        self.assertEqual(self.client.get('/api/binoutput/search', params={'name': 'SwordDirectory'}).json(),
+                         {'entries': [], 'truncated': False})
+        self.assertEqual(self.client.get('/api/binoutput/search', params={'name': ' '}).status_code, 400)
+
+        from webui.references import binoutput_search
+        other = self.dataset / 'other-binoutput'
+        other.mkdir()
+        (other / 'DifferentSword.json').write_text('{}', encoding='utf-8')
+        self.assertEqual(binoutput_search({'RepoPath': str(self.dataset), 'BinPath': str(other)}, 'sword'),
+                         {'entries': [{'key': 'DifferentSword.json', 'name': 'DifferentSword.json'}], 'truncated': False})
+
     def test_binoutput_compact_folders_stop_at_files_or_branches(self):
         root = self.dataset / 'BinOutput'
         for relative in ('Chain/Only/Fork/Left/Leaf/A.json', 'Chain/Only/Fork/Right/B.json',
