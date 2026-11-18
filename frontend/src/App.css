@@ -246,16 +246,10 @@ body.party-time .main-shell { overflow: clip; }
 .log-toolbar > span { flex: 1 1 200px; font-size: 12px; }
 .log-toolbar button { display: inline-flex; align-items: center; gap: 6px; }
 .job-progress { padding: 14px 24px; flex-shrink: 0; font-size: 12px; }
-.job-progress > div:first-child { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.job-progress > div:first-child { display: flex; justify-content: space-between; gap: 12px; }
+.job-progress > .muted { display: block; margin-top: 8px; }
 .job-progress strong { font-weight: 500; }
 .job-progress span { color: #9aa3b0; }
-.job-progress-track { height: 6px; border-radius: 4px; background: #223047; overflow: hidden; }
-.job-progress-track > div { height: 100%; background: #6a9ce9; border-radius: inherit; width: 0; }
-.job-progress-track.indeterminate > div { width: 30%; animation: job-progress-slide 1.6s ease-in-out infinite alternate; }
-.job-progress.succeeded .job-progress-track > div { background: #69b597; }
-.job-progress.failed .job-progress-track { background: #68393e; }
-@keyframes job-progress-slide { from { transform: translateX(0); } to { transform: translateX(235%); } }
-@media (prefers-reduced-motion: reduce) { .job-progress-track.indeterminate > div { animation: none; opacity: .6; } }
 .output-layout { display: grid; grid-template-columns: 260px minmax(0,1fr); height: 460px; }
 .output-layout.with-references { grid-template-columns: 220px minmax(0,1fr) minmax(0,1fr); }
 .reference-panel { border-left: 1px solid #1f2c40; background: #0f1723; }

@@ -503,17 +503,11 @@ function JobProgress({ job }: { job: Job }) {
   const progress = job.progress
   const total = progress?.total, completed = progress?.completed
   const known = job.status === 'running' && total != null && total > 0 && completed != null
-  const percent = job.status === 'succeeded' ? 100 : known ? completed / total * 100 : undefined
   const stage = job.status === 'queued' ? 'Queued' : job.status === 'failed' ? 'Failed' : progress?.stage ?? (active(job) ? 'Running' : 'Completed')
   const count = known ? `${completed} / ${total}` : job.status === 'succeeded' ? '100%' : ''
   const warnings = progress?.warnings ? `${progress.warnings} ${progress.warnings === 1 ? 'warning' : 'warnings'}` : ''
   return <div className={`job-progress ${job.status}`}>
     <div><strong>{stage}</strong><span>{[count, warnings].filter(Boolean).join(' · ')}</span></div>
-    <div className={`job-progress-track${active(job) && percent === undefined ? ' indeterminate' : ''}`}
-      role="progressbar" aria-label="Current Stage Progress" aria-valuemin={0} aria-valuemax={100}
-      aria-valuenow={percent} aria-valuetext={known ? `${stage}: ${completed} of ${total}` : stage}>
-      <div style={{ width: percent === undefined ? undefined : `${percent}%` }} />
-    </div>
     {progress?.message && job.status === 'running' && <span className="muted">{progress.message}</span>}
   </div>
 }
