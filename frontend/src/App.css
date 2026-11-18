@@ -245,11 +245,9 @@ body.party-time .main-shell { overflow: clip; }
 .log-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 24px; border-bottom: 1px solid #1a2535; flex-shrink: 0; }
 .log-toolbar > span { flex: 1 1 200px; font-size: 12px; }
 .log-toolbar button { display: inline-flex; align-items: center; gap: 6px; }
-.job-progress { padding: 14px 24px; flex-shrink: 0; font-size: 12px; }
-.job-progress > div:first-child { display: flex; justify-content: space-between; gap: 12px; }
-.job-progress > .muted { display: block; margin-top: 8px; }
-.job-progress strong { font-weight: 500; }
-.job-progress span { color: #9aa3b0; }
+.job-progress { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 260px; font-size: 12px; }
+.job-progress strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-progress span { color: #9aa3b0; flex-shrink: 0; white-space: nowrap; }
 .output-layout { display: grid; grid-template-columns: 260px minmax(0,1fr); height: 460px; }
 .output-layout.with-references { grid-template-columns: 220px minmax(0,1fr) minmax(0,1fr); }
 .reference-panel { border-left: 1px solid #1f2c40; background: #0f1723; }

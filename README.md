@@ -256,7 +256,7 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   reporter; command failures keep their diagnostics and nonzero exit status.
   Shared generators use the same reporting in CLI runs. Intentional CLI payloads
   (JSON, wikitext, paths, and revision listings) remain plain stdout.
-  Job status shows the current stage and real completed/total counts where known,
+  Job status in the dialog header shows the current stage and real completed/total counts where known,
   without a progress bar or weighted overall estimate. Jobs are marked completed
   only after output files are validated. Warnings are counted without changing whether
   optional generation failures stop the tool.

@@ -504,11 +504,12 @@ function JobProgress({ job }: { job: Job }) {
   const total = progress?.total, completed = progress?.completed
   const known = job.status === 'running' && total != null && total > 0 && completed != null
   const stage = job.status === 'queued' ? 'Queued' : job.status === 'failed' ? 'Failed' : progress?.stage ?? (active(job) ? 'Running' : 'Completed')
-  const count = known ? `${completed} / ${total}` : job.status === 'succeeded' ? '100%' : ''
+  const count = known ? `${completed} / ${total}` : ''
   const warnings = progress?.warnings ? `${progress.warnings} ${progress.warnings === 1 ? 'warning' : 'warnings'}` : ''
-  return <div className={`job-progress ${job.status}`}>
-    <div><strong>{stage}</strong><span>{[count, warnings].filter(Boolean).join(' · ')}</span></div>
-    {progress?.message && job.status === 'running' && <span className="muted">{progress.message}</span>}
+  const detail = job.status === 'running' ? progress?.message : ''
+  return <div className="job-progress" title={[stage, detail].filter(Boolean).join(' · ')}>
+    <strong>{stage}</strong>
+    {(count || warnings) && <span>{[count, warnings].filter(Boolean).join(' · ')}</span>}
   </div>
 }
 
@@ -578,6 +579,7 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
   return <Dialog wide title={job.name} subtitle={`${time(job.created_at)} · ${job.id.slice(0, 8)}`} onClose={() => { if (discard()) onClose() }}
     extra={<>
       <Status status={job.status} />
+      <JobProgress job={job} />
       {!active(job) && <span className="file-count">{job.files.length} {job.files.length === 1 ? 'file' : 'files'}</span>}
       {hasReferences && <button className={`button game-data small${references ? ' toggled' : ''}`} aria-pressed={references}
         title="View the character's BinOutput and attenuation data beside the output"
@@ -586,7 +588,6 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
       {!active(job) && <button className="button danger small" onClick={() => { if (discard()) onDelete() }}><Trash2 size={14} /> Delete</button>}
     </>}>
     {job.error && <div className="job-error error-box" role="alert"><CircleAlert size={18} />{job.error} {job.files.length > 0 && 'Files below may be incomplete.'}</div>}
-    <JobProgress job={job} />
     <div className="detail-tabs">
       <button className={tab === 'output' ? 'selected' : ''} onClick={() => setTab('output')}><FolderOpen size={16} /> Output <span>{job.files.length}</span></button>
       <button className={tab === 'logs' ? 'selected' : ''} onClick={() => { if (discard()) setTab('logs') }}><Terminal size={16} /> Log</button>
