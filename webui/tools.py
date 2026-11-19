@@ -126,6 +126,12 @@ class EnemyInputs(Inputs):
                          description='Used in the generated Change History templates.')
 
 
+class EnemyAIInputs(Inputs):
+    enemy_ids: list[Annotated[int, Field(gt=0)]] = Field(
+        min_length=1, max_length=2000, title='Enemies',
+        description='Select exact monster IDs. Variants with the same name can use different skills.')
+
+
 class FishingInputs(Inputs):
     pool_ids: list[int] = Field(min_length=1, max_length=2000, title='Fishing Point',
                                 description='Generate Fishing Point pages.')
@@ -275,6 +281,16 @@ def enemy(output: Path, parameters: dict[str, JsonValue]) -> None:
     report.info(f'Generated {count} enemy page{"" if count == 1 else "s"}.')
 
 
+def enemy_ai(output: Path, parameters: dict[str, JsonValue]) -> None:
+    from getConfig import CONFIG
+    from utils.enemyAI import write_ai_drafts
+
+    inputs = EnemyAIInputs.model_validate(parameters)
+    count = write_ai_drafts(output, Path(CONFIG.BIN_PATH), inputs.enemy_ids, structured=True,
+                            repo_root=Path(CONFIG.EXCEL_PATH).parent)
+    report.info(f'Generated {count} AI Logic draft(s).')
+
+
 def fishing_points(output: Path, parameters: dict[str, JsonValue]) -> None:
     inputs = FishingInputs.model_validate(parameters)
     from utils.fishing import write_fishing_points
@@ -389,6 +405,9 @@ TOOLS = {
         Tool('enemy', 'Enemy', 'Enemies',
              'Generate pages and stat tables for any enemies, or those added between two versions.',
              EnemyInputs, enemy),
+        Tool('enemy-ai', 'Enemy AI Logic', 'Enemies',
+             'Review and edit AI Logic tables for selected monster IDs. Copy wikitext when ready.',
+             EnemyAIInputs, enemy_ai),
         Tool('spiral-abyss', 'Spiral Abyss', 'Enemies',
              'Generate a Spiral Abyss/Floors page with Ley Line Disorder and each chamber\'s level, target and enemies.',
              AbyssInputs, spiral_abyss),

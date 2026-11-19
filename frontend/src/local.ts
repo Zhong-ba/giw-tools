@@ -183,7 +183,7 @@ const active = (job: Job) => job.status === 'queued' || job.status === 'running'
 /* Jobs */
 
 let jobs: Map<string, Job> | null = null
-const syncing = new Set<string>()
+const syncing = new Map<string, Promise<void>>()
 
 async function savedJobs(store: Disk) {
   if (!jobs) {
@@ -198,10 +198,10 @@ async function savedJobs(store: Disk) {
 }
 
 /** Copies a finished job from the server, then deletes it there. */
-async function collect(store: Disk, job: Job) {
-  if (syncing.has(job.id)) return
-  syncing.add(job.id)
-  try {
+function collect(store: Disk, job: Job): Promise<void> {
+  const pending = syncing.get(job.id)
+  if (pending) return pending
+  const transfer = (async () => {
     for (const file of job.files) {
       const response = await request(`/jobs/${job.id}/files/${encodePath(file.path)}`)
       await store.write(`jobs/${job.id}/output/${file.path}`, await response.blob())
@@ -212,7 +212,9 @@ async function collect(store: Disk, job: Job) {
     await save(store, `jobs/${job.id}/job.json`, job)
     ;(await savedJobs(store)).set(job.id, job)
     await server(`/jobs/${job.id}`, { method: 'DELETE' }).catch(() => undefined)
-  } finally { syncing.delete(job.id) }
+  })().finally(() => { syncing.delete(job.id) })
+  syncing.set(job.id, transfer)
+  return transfer
 }
 
 async function listJobs(): Promise<Job[]> {
@@ -519,6 +521,13 @@ async function handleJobs(path: string, method: string, body: Record<string, unk
   if (!match) throw new ApiError('Not found.', 404)
   const [, id, section, rest] = match
   const { job, local } = await getJob(id)
+  if (!local && job.tool_id === 'enemy-ai' && !active(job) && section === 'files' && method === 'PUT') {
+    const store = await ready()
+    if (store) {
+      await collect(store, job)
+      return handleJobs(path, method, body, options)
+    }
+  }
   if (!local) {
     try { return await server(path, options) }
     catch (reason) {
@@ -551,11 +560,25 @@ async function handleJobs(path: string, method: string, body: Record<string, unk
   if (!file || !blob) throw new ApiError('Output file not found.', 404)
   if (section === 'preview') {
     if (!['.wikitext', '.txt', '.lua', '.json'].includes(suffix(name))) throw new ApiError('This file does not have a text preview.', 415)
-    if (blob.size > 1048576) throw new ApiError('This file is too large to preview. Download it instead.', 413)
+    const limit = job.tool_id === 'enemy-ai' && name === 'Enemy AI Logic.json' ? 16 * 1048576 : 1048576
+    if (blob.size > limit) throw new ApiError('This file is too large to preview. Download it instead.', 413)
     return { text: await blob.text() }
   }
   if (section === 'files' && method === 'PUT') {
     const text = String(body.text ?? '')
+    if (job.tool_id === 'enemy-ai') {
+      if (name !== 'Enemy AI Edits.json') throw new ApiError('This output file cannot be edited.', 409)
+      try {
+        const { names, removed, ...rest } = JSON.parse(text)
+        const rowId = /^[0-9]+:[0-9]+$/
+        if (Object.keys(rest).length || !names || typeof names !== 'object' || Array.isArray(names)
+          || !Array.isArray(removed) || removed.some(id => typeof id !== 'string' || !rowId.test(id))
+          || Object.entries(names).some(([id, label]) => !rowId.test(id) || typeof label !== 'string' || [...label].length > 200))
+          throw new Error('Invalid edits')
+      } catch {
+        throw new ApiError('Invalid Enemy AI edits.', 409)
+      }
+    }
     await store.write(`jobs/${id}/output/${name}`, text)
     const updated = { ...job, files: job.files.map(item => item.path === name ? { ...item, size: new TextEncoder().encode(text).length } : item) }
     await save(store, `jobs/${id}/job.json`, updated)

@@ -17,6 +17,7 @@ import { findMatches, markMatches, useFindShortcut } from './search'
 import { SearchBar } from './SearchBar'
 import { OtherLanguages } from './OtherLanguages'
 import { BinOutputViewer } from './BinOutputViewer'
+import { AI_RESULT, EnemyAITable } from './EnemyAITable'
 
 const icons: Record<string, typeof BookOpen> = { 'other-languages': CloudRetainer, 'binoutput-viewer': Braces, 'character-kit': Guoba, 'attribute-scaling': ChartColumn, 'character-data': ChevronsUp, 'particle-audit': ChartColumn, redirects: Link2, enemy: Hilichurl,
   bounties: Crosshair, 'fishing-point': Fish, 'fish-weights': Scale, 'manual-cooking': CookingPot, 'spiral-abyss': AbyssSpiral, 'imaginarium-theater': TheaterBook, 'stygian-onslaught': StygianBloom }
@@ -226,6 +227,7 @@ const pickers: Record<string, PickerConfig> = {
     search: 'Search by enemy, ID or region...', compare: false, selectAll: true },
 }
 const pickerKey = (tool: Tool) => Object.keys(pickers).find(key => key in tool.schema.properties)
+const enemyAIPicker = { ...pickers.enemy_ids, compare: false, newNames: false }
 
 /** A checklist of the dataset's dated periods (newest first, which starts selected), like the enemy picker. */
 function PeriodPicker({ label, kind, value, preserveSelection, onChange }: {
@@ -472,7 +474,8 @@ function ToolForm({ tool, characters, characterError, submitting, error, onSubmi
             .map(item => <option key={item.id} value={item.id}>{item.name} ({item.id})</option>)}
         </select>
         {characterError && <small className="field-error" role="alert">{characterError}</small>}
-      </>       : pickers[key] ? <ItemPicker config={pickers[key]} value={Array.isArray(values[key]) ? values[key].map(Number) : []}
+      </>       : pickers[key] ? <ItemPicker config={tool.id === 'enemy-ai' && key === 'enemy_ids' ? enemyAIPicker : pickers[key]}
+        value={Array.isArray(values[key]) ? values[key].map(Number) : []}
         preserveSelection={urlState.provided.includes(key)}
         onChange={value => update(key, value)} onVersion={autofillVersion} />
       : property.periods ? <PeriodPicker label={property.title} kind={property.periods}
@@ -622,6 +625,7 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
   const [tab, setTab] = useState<'output' | 'logs'>(job.status === 'failed' || active(job) ? 'logs' : 'output')
   const [references, setReferences] = useState(false)
   const hasReferences = job.tool_id === 'character-kit' && job.status === 'succeeded'
+  const hasAIResult = job.tool_id === 'enemy-ai' && job.status === 'succeeded' && job.files.some(file => file.path === AI_RESULT)
   const [status, setStatus] = useState(job.status)
   const [logs, setLogs] = useState('')
   const [logTruncated, setLogTruncated] = useState(false)
@@ -685,16 +689,16 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
     extra={<>
       <Status status={job.status} />
       <JobProgress job={job} />
-      {!active(job) && <span className="file-count">{job.files.length} {job.files.length === 1 ? 'file' : 'files'}</span>}
+      {!active(job) && !hasAIResult && <span className="file-count">{job.files.length} {job.files.length === 1 ? 'file' : 'files'}</span>}
       {hasReferences && <button className={`button game-data small${references ? ' toggled' : ''}`} aria-pressed={references}
         title="View the character's BinOutput and attenuation data beside the output"
         onClick={() => { setReferences(!references); setTab('output') }}><Braces size={14} /> Game Data</button>}
-      {job.files.length > 0 && !active(job) && <button className="button secondary small" onClick={() => { void downloadArchive(job).catch(reason => setError(message(reason))) }}><ArrowDownToLine size={15} /> Download ZIP</button>}
+      {job.files.length > 0 && !active(job) && !hasAIResult && <button className="button secondary small" onClick={() => { void downloadArchive(job).catch(reason => setError(message(reason))) }}><ArrowDownToLine size={15} /> Download ZIP</button>}
       {!active(job) && <button className="button danger small" onClick={() => { if (discard()) onDelete() }}><Trash2 size={14} /> Delete</button>}
     </>}>
     {job.error && <div className="job-error error-box" role="alert"><CircleAlert size={18} />{job.error} {job.files.length > 0 && 'Files below may be incomplete.'}</div>}
     <div className="detail-tabs">
-      <button className={tab === 'output' ? 'selected' : ''} onClick={() => setTab('output')}><FolderOpen size={16} /> Output <span>{job.files.length}</span></button>
+      <button className={tab === 'output' ? 'selected' : ''} onClick={() => setTab('output')}><FolderOpen size={16} /> Output {!hasAIResult && <span>{job.files.length}</span>}</button>
       <button className={tab === 'logs' ? 'selected' : ''} onClick={() => { if (discard()) setTab('logs') }}><Terminal size={16} /> Log</button>
     </div>
     {(error || logError) && <div className="job-error error-box" role="alert">{error || logError}</div>}
@@ -710,7 +714,9 @@ function JobDialog({ job, onClose, onDelete, onQueued }: { job: Job; onClose: ()
         <span key={index} className={/^\[\d+:\d+\] ERROR/.test(line) ? 'log-error' : /^\[\d+:\d+\] WARNING/.test(line) ? 'log-warning' : undefined}>{line}{'\n'}</span>)
         : job.status === 'queued' ? 'Queued.' : 'No log output.'}</pre>
     </> :
-      job.files.length === 0 ? <div className="empty"><FolderOpen size={32} /><p>{active(job) ? 'Files appear when the job finishes.' : 'No output files.'}</p></div> :
+      hasAIResult
+        ? <EnemyAITable key={job.id} jobId={job.id} onDirty={value => { dirty.current = value }} />
+        : job.files.length === 0 ? <div className="empty"><FolderOpen size={32} /><p>{active(job) ? 'Files appear when the job finishes.' : 'No output files.'}</p></div> :
       <div className={`output-layout${references && hasReferences ? ' with-references' : ''}`}>
         <div className="file-list">
           {pages.length > 0 && <div className="queue-bar">

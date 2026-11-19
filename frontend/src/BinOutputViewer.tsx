@@ -14,6 +14,7 @@ interface References { character: string; files: ReferenceFile[]; warnings: stri
 interface TreeEntry { key: string; name: string; directory: boolean; size: number | null }
 type Source = { kind: 'all' } | { kind: 'character' | 'enemy' | 'gadget'; id: number } | { kind: 'job'; id: string }
 type Filter = 'all' | 'attackInfo' | 'elemBall'
+export interface SkillReference { path: string; snapshot: string; kind: string; focus: string; pointer?: string[]; section?: string[]; attackInfo?: boolean }
 const publicScopes = ['character', 'enemy', 'gadget'] as const
 const defaultHighlights = JSON_HIGHLIGHTS.map(rule => rule.id)
 const toolId = 'binoutput-viewer'
@@ -197,15 +198,20 @@ function Directory({ path, name, selected, expanded, load, onSelect }: {
   </div>
 }
 
-function Browser({ source, highlights, cleanDecimals, filename, link, listings }: {
+function Browser({ source, highlights, cleanDecimals, filename, link, listings, skillReference }: {
   source: Source; highlights: string[]; cleanDecimals: boolean; filename: string
   link?: ReturnType<typeof readViewerLink>; listings: Map<string, TreeEntry[]>
+  skillReference?: SkillReference
 }) {
   const [references, setReferences] = useState<References | null>(null)
-  const [selected, setSelected] = useState(link?.path ?? '')
+  const [selected, setSelected] = useState(skillReference?.path ?? link?.path ?? '')
   const [text, setText] = useState('')
-  const [filter, setFilter] = useState<Filter>(link?.filter ?? 'all')
-  const [loading, setLoading] = useState(source.kind !== 'all' || !!link?.path)
+  const [filter, setFilter] = useState<Filter>(() => {
+    if (!skillReference) return link?.filter ?? 'all'
+    const showAttackInfo = skillReference.attackInfo ?? (skillReference.kind !== 'Monster skill record')
+    return showAttackInfo ? 'attackInfo' : 'all'
+  })
+  const [loading, setLoading] = useState(source.kind !== 'all' || !!link?.path || !!skillReference)
   const [error, setError] = useState('')
   const [foundNames, setFoundNames] = useState<{ term: string; entries: { key: string; name: string }[]; truncated: boolean; error?: string }>()
   const [copiedMode, setCopiedMode] = useState<boolean | null>(null)
@@ -270,12 +276,12 @@ function Browser({ source, highlights, cleanDecimals, filename, link, listings }
     if (!selected || !canLoadFile) return
     const controller = new AbortController()
     const endpoint = jobId ? `/jobs/${jobId}/references/${encodePath(legacyKey ?? selected)}`
-      : `/binoutput/file?path=${encodeURIComponent(selected)}${queryString ? `&${queryString}` : ''}`
+      : `/binoutput/file?path=${encodeURIComponent(selected)}${queryString ? `&${queryString}` : ''}${skillReference ? `&snapshot=${skillReference.snapshot}` : ''}`
     api<{ text: string }>(endpoint, { signal: controller.signal }).then(result => { if (!controller.signal.aborted) setText(result.text) })
       .catch(reason => { if (!controller.signal.aborted) setError(message(reason)) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [jobId, selected, queryString, legacyKey, canLoadFile])
+  }, [jobId, selected, queryString, legacyKey, canLoadFile, skillReference])
   const tree = useMemo(() => {
     const result = new Map<string, Map<string, TreeEntry>>()
     result.set('', new Map())
@@ -313,9 +319,27 @@ function Browser({ source, highlights, cleanDecimals, filename, link, listings }
   }, [related, tree, listings])
   const parsed = useMemo(() => {
     if (!text) return { value: undefined, error: '' }
-    try { return { value: JSON.parse(text) as unknown, error: '' } }
+    try {
+      const value: unknown = JSON.parse(text)
+      if (!skillReference) return { value, error: '' }
+      if (skillReference.kind === 'Monster source file') return { value, error: '' }
+      const at = (node: unknown, key: string) => isRecord(node) && Object.hasOwn(node, key) ? node[key] : undefined
+      const definition = skillReference.pointer
+        ? skillReference.pointer.reduce<unknown>(at, value)
+        : findJson(value, (_, node) => isRecord(node) && node.abilityName === skillReference.focus ? node : undefined)
+          .map(match => match.value)
+      const focused = skillReference.section && Array.isArray(definition)
+        ? definition.flatMap(node => {
+          const section = skillReference.section?.reduce<unknown>(at, node)
+          return section === undefined ? [] : [section]
+        })
+        : definition
+      if (focused === undefined || Array.isArray(focused) && !focused.length)
+        return { value: undefined, error: 'The referenced JSON section could not be found.' }
+      return { value: focused, error: '' }
+    }
     catch (reason) { return { value: undefined, error: `Could not parse JSON: ${message(reason)}` } }
-  }, [text])
+  }, [text, skillReference])
   const matches = useMemo(() => Object.fromEntries(filters.map(item =>
     [item.id, parsed.value === undefined ? [] : findJson(parsed.value, item.pick)])), [parsed])
   const current = parsed.value === undefined ? undefined : filters.find(item => item.id === filter)
@@ -373,8 +397,8 @@ function Browser({ source, highlights, cleanDecimals, filename, link, listings }
     catch (reason) { setError(`Could not copy: ${message(reason)}`) }
   }
   const selectedFile = references?.files.find(file => file.key === selected)
-  return <div className="binoutput-layout">
-    <aside className="binoutput-tree" aria-label="BinOutput File Tree">
+  return <div className={`binoutput-layout${skillReference ? ' ai-reference-layout' : ''}`}>
+    {!skillReference && <aside className="binoutput-tree" aria-label="BinOutput File Tree">
       <div className="binoutput-tree-title">{related ? `${references?.character ?? 'Relevant Files'}${references ? ` (${references.files.length})` : ''}` : 'BinOutput'}</div>
       {term ? nameResults?.error ? <div className="error-box" role="alert">{nameResults.error}</div>
         : !nameResults ? <span className="muted" role="status">{related && error ? 'Could not load filenames.' : 'Searching filenames...'}</span>
@@ -389,14 +413,14 @@ function Browser({ source, highlights, cleanDecimals, filename, link, listings }
       {references && references.warnings.length > 0 && <details className="binoutput-warnings"><summary>Discovery Notes ({references.warnings.length})</summary>
         <ul>{references.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
       </details>}
-    </aside>
+    </aside>}
     <div className="preview-panel binoutput-preview">
       <div className="preview-header"><span title={selectedFile?.reasons.join('\n') ?? selected}>{selected || 'Select a JSON File'}</span><div>
         {text && !loading && <button className="icon-button" onClick={openSearch} aria-label="Search game data" title="Search (Ctrl+F)"><Search size={16} /></button>}
         {text && !loading && <button className="icon-button" onClick={() => { void copy() }} aria-label="Copy game data" title={current ? 'Copy filtered data' : 'Copy'}>{copiedMode === cleanDecimals ? <Check size={16} /> : <Copy size={16} />}</button>}
       </div></div>
       {text && !loading && parsed.value !== undefined && <div className="reference-filters" role="group" aria-label="Filter game data">
-        <button className={!current ? 'selected' : ''} aria-pressed={!current} onClick={() => chooseFilter('all')}>Full File</button>
+        <button className={!current ? 'selected' : ''} aria-pressed={!current} onClick={() => chooseFilter('all')}>{skillReference && skillReference.kind !== 'Monster source file' ? 'Referenced Section' : 'Full File'}</button>
         {filters.map(item => <button key={item.id} className={current?.id === item.id ? 'selected' : ''} aria-pressed={current?.id === item.id}
           title={item.title} onClick={() => chooseFilter(item.id)}>{item.label} <span>{matches[item.id].length}</span></button>)}
       </div>}
@@ -412,9 +436,17 @@ function Browser({ source, highlights, cleanDecimals, filename, link, listings }
       {loading ? <div className="empty"><LoaderCircle className="spin" />Loading BinOutput...</div> :
         !selected ? <div className="empty"><Braces size={28} /><p>{references?.files.length === 0 ? 'No relevant JSON files found.' : 'Select a JSON file from the tree.'}</p></div> :
           current && !matches[current.id].length ? <div className="empty"><Braces size={28} /><p>No {current.label} in this file.</p></div> :
-            text && <JsonView key={`${selected}:${current?.id ?? 'all'}`} lines={view.lines} query={needle} active={activeHit} focus={focus ?? gadgetFocus} highlights={highlights} />}
+            text && (!skillReference || !parsed.error) && <JsonView key={`${selected}:${current?.id ?? 'all'}`} lines={view.lines} query={needle} active={activeHit} focus={focus ?? gadgetFocus} highlights={highlights} />}
     </div>
   </div>
+}
+
+export function SkillReferenceViewer({ reference }: { reference: SkillReference }) {
+  const [listings] = useState(() => new Map<string, TreeEntry[]>())
+  return <section className="binoutput-panel enemy-ai-code" aria-label="BinOutput Viewer">
+    <Browser key={JSON.stringify(reference)} source={{ kind: 'all' }} filename="" listings={listings}
+      highlights={defaultHighlights} cleanDecimals skillReference={reference} />
+  </section>
 }
 
 export function BinOutputViewer({ jobId, onClose, characters: initialCharacters = [] }: {
@@ -436,7 +468,7 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
   const [highlights, setHighlights] = useState(initial.highlights)
   const [cleanDecimals, setCleanDecimals] = useState(initial.cleanDecimals)
   const scopeId = useId()
-  const characterMode = mode === 'character' || mode === 'job'
+  const characterMode = mode === 'character'
   const scopeValue = mode === 'character' ? character : mode === 'enemy' ? enemy : mode === 'gadget' ? gadget : ''
   const highlightParam = defaultHighlights.filter(id => highlights.includes(id)).join(',')
   useEffect(() => {
@@ -463,10 +495,9 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
     return () => controller.abort()
   }, [mode, characterMode, characters.length, enemies, gadgets])
   const characterOptions = useMemo(() => [
-    ...(jobId ? [{ value: 'job', label: 'Job Character' }] : []),
     ...characters.map(item => ({ value: String(item.id),
       label: `${item.name}${item.id === 10000005 ? ' (Aether)' : item.id === 10000007 ? ' (Lumine)' : ''} · ${item.id}` })),
-  ], [characters, jobId])
+  ], [characters])
   const enemyOptions = useMemo(() => enemies?.map(item => ({ value: String(item.id),
     label: `${item.name} · ${item.id}${item.internal ? ` · ${item.internal}` : ''}` })) ?? null, [enemies])
   const gadgetOptions = useMemo(() => gadgets?.map(item => ({ value: String(item.id),
@@ -479,18 +510,17 @@ export function BinOutputViewer({ jobId, onClose, characters: initialCharacters 
   if (mode === 'gadget' && gadget) source = { kind: 'gadget', id: Number(gadget) }
   return <section className={`binoutput-panel${jobId ? ' reference-panel' : ' binoutput-tool'}`} aria-label="BinOutput Viewer">
     <div className="binoutput-toolbar">
-      <div className="binoutput-scope" role="radiogroup" aria-label="Filter By"><span>Filter By</span>
+      {!jobId && <div className="binoutput-scope" role="radiogroup" aria-label="Filter By"><span>Filter By</span>
         {(['all', 'character', 'enemy', 'gadget'] as const).map(value => <label key={value}>
           <input type="radio" name={`${scopeId}-scope`} value={value}
             checked={value === 'character' ? characterMode : mode === value} onChange={() => {
-              resetFileLink(); setError(''); setMode(value === 'character' && jobId && !character ? 'job' : value)
+              resetFileLink(); setError(''); setMode(value)
             }} />{value === 'all' ? 'None' : value === 'character' ? 'Character' : value === 'enemy' ? 'Enemy' : 'Gadget'}
         </label>)}
-      </div>
-      {characterMode && <FilterPicker label="Character" value={mode === 'job' ? 'job' : character}
+      </div>}
+      {characterMode && <FilterPicker label="Character" value={character}
         options={characterOptions} onChange={value => {
-        if (value === 'job') { if (mode !== 'job') { resetFileLink(); setMode('job') } }
-        else if (value !== character || mode !== 'character') { resetFileLink(); setCharacter(value); setMode('character') }
+        if (value !== character) { resetFileLink(); setCharacter(value) }
       }} />}
       {mode === 'enemy' && <FilterPicker label="Enemy" value={enemy} options={enemyOptions} onChange={value => {
         if (value !== enemy) { resetFileLink(); setEnemy(value) }

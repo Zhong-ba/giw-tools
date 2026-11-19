@@ -320,6 +320,160 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/jobs/{job['id']}").status_code, 404)
         self.assertEqual(self.client.delete(f"/api/jobs/{job['id']}").status_code, 404)
 
+    def test_enemy_ai_job_edits_and_references(self):
+        from utils.enemyAI import EDITS_FILE, RESULT_FILE
+
+        root = self.dataset / 'BinOutput'
+        (root / 'Monster').mkdir(parents=True, exist_ok=True)
+        (root / 'Ability').mkdir(exist_ok=True)
+        ability = root / 'Ability' / 'Enemy.json'
+        ability.write_text(json.dumps([
+            {'abilityName': 'Attack_Exact', 'events': [
+                {'attackInfo': {'attackProperty': {'elementType': 'Fire', 'damagePercentage': 0.30000001192092896}}},
+                {'attackInfo': {'attackProperty': {'elementType': 'Fire', 'damagePercentage': 0.7}}},
+                {'attackInfo': {'attackProperty': {'elementType': 'Fire', 'damagePercentage': 0.7}}},
+                {'attackInfo': {}},
+            ]},
+            {'abilityName': 'Enemy_Smash_Turn'},
+            {'abilityName': 'Enemy_Smash1_Hit', 'modifiers': {'Hit': {'attackInfo': {'example': 2}}}},
+            {'abilityName': 'Enemy_SmashOther_Hit', 'attackInfo': {'example': 3}},
+        ]), encoding='utf-8')
+        gate = {'MAGBAFADLAM': 360, 'JHDKBGNBIFI': 5}
+        (root / 'Monster' / 'Enemy_123.json').write_text(json.dumps({
+            'abilities': [{'abilityName': 'Attack_Exact', 'abilityID': 'Attack'},
+                          {'abilityName': 'Attack_Exact', 'abilityID': 'Attack'},
+                          {'abilityName': 'Enemy_Smash_Turn', 'abilityID': 'Smash_Turn'},
+                          {'abilityName': 'Enemy_Smash1_Hit'},
+                          {'abilityName': 'Enemy_SmashOther_Hit'}],
+            'combat': {'animEvents': {'Smash': {'attackInfo': {'attackProperty': {'damagePercentage': 0}}}}},
+            'aibeta': {'skills': {'201': {'name': 'Attack', 'stateIDs': ['Attack'], 'PBKCKJFILBL': gate},
+                                 '202': {'name': 'Smash', 'stateIDs': ['Smash'], 'PBKCKJFILBL': gate}}},
+        }), encoding='utf-8')
+        response = self.client.post('/api/jobs', json={'tool_id': 'enemy-ai', 'parameters': {'enemy_ids': [123]}})
+        self.assertEqual(response.status_code, 202, response.text)
+        job = self.wait(response.json()['id'])
+        self.assertEqual(job['status'], 'succeeded', job)
+        path = f"/api/jobs/{job['id']}"
+        result = json.loads(self.client.get(f'{path}/preview/{RESULT_FILE}').json()['text'])
+        row = result['monsters'][0]['rows'][0]
+        self.assertEqual((row['id'], row['name']), ('201', 'Attack'))
+        reference = row['references'][0]
+        self.assertEqual((reference['kind'], reference['focus']), ('Ability ID match', 'Attack_Exact'))
+        self.assertTrue(reference['attackInfo'])
+        self.assertEqual([ref['kind'] for ref in row['references']], ['Ability ID match', 'Monster source file'])
+        self.assertNotIn('attacks', row['references'][1])
+        self.assertEqual(reference['attacks'], [
+            {'element': 'Pyro', 'percent': '30%'},
+            {'element': 'Pyro', 'percent': '70%'},
+            {'element': 'Pyro', 'percent': '70%'},
+        ])
+        smash_refs = result['monsters'][0]['rows'][1]['references']
+        self.assertEqual([(ref['kind'], ref['focus'], ref['attackInfo']) for ref in smash_refs], [
+            ('Monster animation event', 'Smash', True),
+            ('Related Ability candidate', 'Enemy_Smash1_Hit', True),
+            ('Related Ability candidate', 'Enemy_Smash_Turn', False),
+        ])
+        self.assertEqual(smash_refs[0]['attacks'], [{'element': 'Physical', 'percent': '0%'}])
+        self.assertEqual(smash_refs[1]['attacks'], [{'element': 'Physical', 'percent': None}])
+        self.assertNotIn('attacks', smash_refs[2])
+        params = {key: reference[key] for key in ('path', 'snapshot')}
+        self.assertEqual(self.client.get('/api/binoutput/file', params=params).status_code, 200)
+        ability.write_text('{}', encoding='utf-8')
+        self.assertEqual(self.client.get('/api/binoutput/file', params=params).status_code, 409)
+
+        edits = {'text': '{"names":{"123:201":"Edited"},"removed":["123:201"]}'}
+        self.assertEqual(self.client.put(f'{path}/files/{RESULT_FILE}', json=edits).status_code, 409)
+        self.assertEqual(self.client.put(f'{path}/files/{EDITS_FILE}', json={'text': '[]'}).status_code, 409)
+        self.assertEqual(self.client.put(f'{path}/files/{EDITS_FILE}', json=edits).status_code, 200)
+        self.assertEqual(self.client.get(f'{path}/preview/{EDITS_FILE}').json(), edits)
+
+    def test_enemy_ai_matches_bounded_monster_event_aliases(self):
+        from utils.enemyAI import RESULT_FILE
+
+        root = self.dataset / 'BinOutput' / 'Monster'
+        root.mkdir(parents=True, exist_ok=True)
+        hit = {'attackInfo': {'attackProperty': {'damagePercentage': 1}}}
+        boosted = {'attackInfo': {'attackProperty': {'damagePercentage': 1, 'elementType': 'Grass'}}}
+        (root / 'Enemy_123.json').write_text(json.dumps({
+            'combat': {'animEvents': {
+                'MeleeAttack01': hit, 'MeleeAttack01_Boost': boosted,
+                'MeleeAttack02': hit, 'ConfusedMeleeAttack01': hit, 'StampAtk': hit, 'SwipeAtk': hit,
+            }},
+            'stateLayers': {'defaultLayer': {'stateIDs': {
+                'MeleeAttack01_Attack': {'animatorStates': {'MeleeAttack01_Boost': []}},
+            }}},
+            'aibeta': {'skills': {'201': {
+                'name': 'Combo', 'stateIDs': ['MeleeAttack01_Attack', 'Stamp', 'Swipe'],
+                'PBKCKJFILBL': {'MAGBAFADLAM': 360, 'JHDKBGNBIFI': 5},
+            }}},
+        }), encoding='utf-8')
+        response = self.client.post('/api/jobs', json={'tool_id': 'enemy-ai', 'parameters': {'enemy_ids': [123]}})
+        self.assertEqual(response.status_code, 202, response.text)
+        job = self.wait(response.json()['id'])
+        self.assertEqual(job['status'], 'succeeded', job)
+        result = json.loads(self.client.get(f'/api/jobs/{job["id"]}/preview/{RESULT_FILE}').json()['text'])
+        refs = result['monsters'][0]['rows'][0]['references']
+        self.assertEqual([(ref['focus'], ref['confidence'], ref['attacks'][0]['element']) for ref in refs], [
+            ('MeleeAttack01_Boost', 'direct', 'Dendro'),
+            ('MeleeAttack01', 'candidate', 'Physical'),
+            ('StampAtk', 'candidate', 'Physical'),
+            ('SwipeAtk', 'candidate', 'Physical'),
+        ])
+
+    def test_enemy_ai_traces_only_supported_attack_links(self):
+        from utils.enemyAI import RESULT_FILE
+
+        root = self.dataset / 'BinOutput'
+        for folder in ('Monster', 'Ability', 'Gadget'):
+            (root / folder).mkdir(parents=True, exist_ok=True)
+        excel = self.dataset / 'ExcelBinOutput'
+        excel.mkdir(exist_ok=True)
+        (excel / 'GadgetExcelConfigData.json').write_text(json.dumps([
+            {'id': 42, 'jsonName': 'Bolt', 'type': 'Bullet'},
+        ]), encoding='utf-8')
+        (root / 'Gadget' / 'Projectiles.json').write_text(json.dumps({
+            'Bolt': {'abilities': [{'abilityName': 'BoltHit'}]},
+        }), encoding='utf-8')
+        hit = {'$type': 'TriggerAttackEvent', 'attackEvent': {
+            'attackInfo': {'attackProperty': {'elementType': 'Electric', 'damagePercentage': 0.625}},
+        }}
+        spawn = {'$type': 'TriggerBullet', 'bulletID': 42}
+        (root / 'Ability' / 'Enemy.json').write_text(json.dumps([
+            {'abilityName': 'SharedMove', 'abilityMixins': [
+                {'$type': 'AttachToStateIDMixin', 'stateIDs': ['Rush'], 'modifierName': 'Launch'},
+            ], 'SCRAMBLEDX': {'Launch': {'onAdded': [hit, spawn], 'onRemoved': [hit]},
+                             'Unlinked': {'onAdded': [hit]}}},
+            {'abilityName': 'Burst', 'onAbilityStart': [spawn, spawn]},
+            {'abilityName': 'BoltHit', 'onAbilityStart': [
+                {**hit, 'predicates': [{'$type': 'ByTargetGlobalValue', 'key': 'Enhance', 'compareType': 'NoneOrEqual'}]},
+                {**hit, 'predicates': [{'$type': 'ByTargetGlobalValue', 'key': 'Enhance', 'value': 1}]},
+            ]},
+        ]), encoding='utf-8')
+        gate = {'MAGBAFADLAM': 360, 'JHDKBGNBIFI': 5}
+        (root / 'Monster' / 'Enemy_123.json').write_text(json.dumps({
+            'abilities': [{'abilityName': 'SharedMove'}, {'abilityName': 'Burst', 'abilityID': 'Burst'}],
+            'stateLayers': {'defaultLayer': {'stateIDs': {'Rush': {'animatorStates': {'RushAnim': []}}}}},
+            'combat': {'animEvents': {'RushAnim': hit['attackEvent']}},
+            'aibeta': {'skills': {'201': {'name': 'Rush', 'stateIDs': ['Rush'], 'PBKCKJFILBL': gate},
+                                 '202': {'name': 'Burst', 'stateIDs': ['Burst'], 'PBKCKJFILBL': gate}}},
+        }), encoding='utf-8')
+        response = self.client.post('/api/jobs', json={'tool_id': 'enemy-ai', 'parameters': {'enemy_ids': [123]}})
+        self.assertEqual(response.status_code, 202, response.text)
+        job = self.wait(response.json()['id'])
+        self.assertEqual(job['status'], 'succeeded', job)
+        rows = json.loads(self.client.get(f'/api/jobs/{job["id"]}/preview/{RESULT_FILE}').json()['text'])['monsters'][0]['rows']
+        direct, modifier, projectile = rows[0]['references']
+        self.assertEqual((direct['confidence'], direct['pointer']), ('direct', ['combat', 'animEvents', 'RushAnim']))
+        self.assertEqual((modifier['confidence'], modifier['section']), ('traced', ['SCRAMBLEDX', 'Launch', 'onAdded']))
+        self.assertEqual(modifier['attacks'], [{'element': 'Electro', 'percent': '62.5%'}])
+        self.assertEqual((projectile['focus'], projectile['confidence']), ('BoltHit', 'traced'))
+        self.assertIn('Gadget Excel 42: Bolt', ' '.join(projectile['evidence']))
+        candidate = rows[1]['references'][0]
+        self.assertIn('Monster source file', [ref['kind'] for ref in rows[1]['references']])
+        self.assertEqual((candidate['focus'], candidate['confidence']), ('BoltHit', 'candidate'))
+        self.assertIn('2 configured spawn action(s)', ' '.join(candidate['evidence']))
+        self.assertEqual([attack['condition'] for attack in candidate['attacks']], ['Enhance: NoneOrEqual', 'Enhance = 1'])
+
     def test_bot_queue_and_posting(self):
         import httpx
         from urllib.parse import parse_qs

@@ -19,6 +19,51 @@ ROOT = Path(__file__).resolve().parents[1]
 LANGS = ['CHS', 'CHT', 'DE', 'EN', 'ES', 'FR', 'ID', 'JP', 'KR', 'PT', 'RU', 'TH', 'VI', 'TR', 'IT']
 
 
+class EnemyAIDraftTests(unittest.TestCase):
+    def test_extracts_selection_gate_and_separate_cooldowns(self):
+        from utils.enemyAI import draft
+
+        skill = {
+            'name': 'Smash', 'skillType': 'Combat', 'priority': 5,
+            'cd': 2, 'CIAJDMHGJFG': 12.5, 'cdUpperRange': 5,
+            'castCondition': {'pickRangeMax': 20},
+            'PBKCKJFILBL': {'MAGBAFADLAM': 360, 'JHDKBGNBIFI': 7, 'JHJBNCLANGO': 45},
+            'skillGroupCDID': 3, 'publicCDGroup': 'Example',
+        }
+        data = {'aibeta': {
+            'skills': {'201': skill, '202': dict(skill, CIAJDMHGJFG=0, cdUpperRange=0)},
+            'skillGCD': 3, 'skillGroupCDConfigs': [{'skillGroupCDID': 3, 'skillGroupCDTime': 8}],
+        }}
+        text, warnings = draft(24010101, data, {'Example': 5})
+        self.assertIn('===AI Logic===', text)
+        self.assertIn('Punch and Jump Combo || 0&ndash;7 || 0&ndash;45 || 5 || 12.5&ndash;17.5'
+                      ' || 8 || Example || 5 || 3', text)
+        self.assertIn('Smash || 0&ndash;7 || 0&ndash;45 || 5 || 0', text)
+        self.assertNotIn('202', text)
+        self.assertEqual(warnings, [])
+
+    def test_reports_missing_unsupported_and_ambiguous_variants_without_drafts(self):
+        from utils.enemyAI import write_ai_drafts
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            monsters = root / 'Monster'
+            monsters.mkdir()
+            (monsters / 'Enemy_1.json').write_text('{"aibeta": {}}', encoding='utf-8')
+            (monsters / 'Enemy_2.json').write_text(
+                '{"aibeta": {"skills": {"1": {"name": "Attack", "cd": 2}}}}', encoding='utf-8')
+            (monsters / 'Enemy_4.json').write_text('{}', encoding='utf-8')
+            (monsters / '4.json').write_text('{}', encoding='utf-8')
+            output = root / 'output'
+            self.assertEqual(write_ai_drafts(output, root, [1, 2, 3, 4]), 0)
+            self.assertEqual([path.name for path in output.iterdir()], ['AI Logic Diagnostics.txt'])
+            text = (output / 'AI Logic Diagnostics.txt').read_text(encoding='utf-8')
+            self.assertIn('1 - Monster/Enemy_1.json\nNo readable aibeta.skills table.', text)
+            self.assertIn('2 - Monster/Enemy_2.json\nNo skills with a supported selection layout.', text)
+            self.assertIn('3\nNo exact ID-specific ConfigMonster file', text)
+            self.assertIn('4\nAmbiguous exact ID matches', text)
+
+
 class ReportingTests(unittest.TestCase):
     def test_file_confirmations_are_debug_and_missing_files_are_counted(self):
         import toolLog as report

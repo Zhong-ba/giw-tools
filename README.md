@@ -437,6 +437,37 @@ The existing `GENSHIN_TOOLS_CONFIG` environment variable selects the profile.
   or the version comparison with
   `python parseMisc.py --newenemies True --ver 7.2 --oldrev previous --newnamesonly True`
   (`--oldrev` also accepts a full commit hash; omit both for the old behaviour).
+- **Enemy AI Logic** (draft) is a separate tool under **Enemies**. Run
+  `.\previewSite.bat`, open **Enemy AI Logic**, and select exact monster IDs
+  (try `24010101` for Ruin Guard or `25080101` for Nobushi: Jintouban). The tool
+  supports the prepared GuraFoundation AI layout; missing or unsupported configs
+  produce diagnostics rather than using a different variant. In the job result,
+  use the pencil to open the name editor, then apply or cancel the change.
+  Select an ability name to open **Skill Details** on the right, view the skill
+  ID and linked Attack Info, or remove that row. Hover over a row or tab to its
+  name to preview the element and configured damage multiplier of each attack
+  record. **Direct Attacks** come from matching Monster combat events; **Traced
+  Attacks** follow state-bound modifiers and their spawned objects. Name-only
+  matches, including their projectile chains, remain **Candidate Attacks**.
+  Inspect **Reference Evidence** to see how a record was linked. Configured
+  conditions are displayed separately; neither record nor spawn counts
+  guarantee in-game hits. Missing animation-event timelines are not inferred.
+  Monster event names that match an attack state after a supported suffix change
+  appear as candidates, with normal and boosted records kept separate. If no
+  Monster attack event matches, Skill Details offers the full exact Monster file.
+  Records without an element are shown as Physical. Rerun older jobs for the
+  updated references.
+  Removed rows can be restored. **Save Edits** keeps changes with the job.
+  **Show Empty Columns** reveals columns that have no applicable values.
+  BinOutput Viewer prefers references with Attack Info. Related
+  candidates are labeled separately from exact ID matches. **Copy Wikitext**
+  exports the current table. **Minimal
+  Wikitext** omits columns that are not applicable to any remaining row, but
+  keeps unresolved `?` and explicit values such as zero. Nothing is queued for
+  posting. Initial cooldowns, phase requirements, and interval trigger/ignore
+  flags are not inferred.
+  CLI: `python parseMisc.py --enemyai 24010101,25080101` (writes to `Enemy AI Logic`
+  under the configured output folder; reference evidence is in the diagnostics).
 - Enemy, Fishing Point and Bounties share the same picker: search, multi-select,
   and **Compare Versions** to list only rows added between two builds (IDs only,
   so any revision works). The versions offered are those of each tool's table.

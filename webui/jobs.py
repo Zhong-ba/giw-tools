@@ -346,7 +346,10 @@ class JobManager:
                 raise ValueError('Wait for the job to finish before editing its files.')
             path = self.file(job_id, name, client)
             if path.suffix.lower() != '.wikitext':
-                raise ValueError('Only .wikitext files can be edited.')
+                from utils.enemyAI import EDITS_FILE, validate_edits
+                if job.tool_id != 'enemy-ai' or name != EDITS_FILE:
+                    raise ValueError('This output file cannot be edited.')
+                validate_edits(text)
             content = text.replace('\r\n', '\n')
             if b'\r\n' in path.read_bytes():
                 content = content.replace('\n', '\r\n')

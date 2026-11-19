@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 
 import OLGen
 import toolLog as report
@@ -21,6 +22,7 @@ parser.add_argument('--redirectfromstr', type = str)
 parser.add_argument('--oldrev', type = str, help = 'GitHub data source: compare --newenemies and --fishingpoints new against this commit, or "previous" for the newest commit of the previous game version, instead of RepoPathOld.')
 parser.add_argument('--newnamesonly', type = bool, help = '--newenemies: only write pages for enemy names that did not exist in the older build.')
 parser.add_argument('--enemies', type = str, help = 'Comma-separated monster IDs: write their pages and stat tables (with --ver).')
+parser.add_argument('--enemyai', type = str, help = 'Comma-separated exact monster IDs: write review-only AI Logic drafts.')
 parser.add_argument('--abyss', type = str, help = 'Write the Spiral Abyss/Floors page of the rotation starting on this date (YYYY-MM-DD), or "latest" (with --ver for startVersion).')
 parser.add_argument('--stygian', type = str, help = 'Write the Stygian Onslaught page of the event starting on this date (YYYY-MM-DD), or "latest" (with --ver).')
 parser.add_argument('--theater', type = str, help = 'Write the Imaginarium Theater page of the season starting on this date (YYYY-MM-DD), or "latest" (with --ver for startVersion).')
@@ -60,6 +62,18 @@ if args.enemies:
     from utils.enemies import parse_enemies
     OLGen.load_data()
     parse_enemies(args, OLGen.gen_ol, [int(value) for value in args.enemies.split(',') if value.strip()])
+
+if args.enemyai is not None:
+    from utils.enemyAI import write_ai_drafts
+    try:
+        ids = [int(value) for value in args.enemyai.split(',')]
+        if any(monster_id <= 0 for monster_id in ids):
+            raise ValueError
+    except ValueError:
+        parser.error('--enemyai expects comma-separated positive monster IDs.')
+    count = write_ai_drafts(Path(CONFIG.OUTPUT_PATH) / 'Enemy AI Logic', Path(CONFIG.BIN_PATH), ids,
+                            repo_root=Path(CONFIG.EXCEL_PATH).parent)
+    report.info(f'Generated {count} AI Logic draft(s).')
     
 if args.fishingpoints:
     from utils.fishing import parse_fishing_points

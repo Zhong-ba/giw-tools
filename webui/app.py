@@ -527,13 +527,19 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
     def binoutput_file(path: str = Query(..., min_length=1, max_length=4096),
                        character_id: int | None = Query(None, ge=1), enemy_id: int | None = Query(None, ge=1),
                        gadget_id: int | None = Query(None, ge=1),
+                       snapshot: str | None = Query(None, pattern=r'^[0-9a-f]{64}$'),
                        config: dict = Depends(prepared)):
         if character_id is not None or enemy_id is not None or gadget_id is not None:
             found = binoutput_references(config, character_id, enemy_id, gadget_id)[1]
             return reference_text([{**item, 'key': item['relative']} for item in found], path)
         try:
             file = binoutput_path(config, path)
-            return {'text': read_reference({'path': file})}
+            text = read_reference({'path': file})
+            if snapshot is not None:
+                from utils.enemyAI import snapshot as file_snapshot
+                if file_snapshot(text) != snapshot:
+                    raise HTTPException(409, 'This file differs from the job snapshot. Select the original dataset.')
+            return {'text': text}
         except OverflowError as error:
             raise HTTPException(413, str(error)) from error
         except FileNotFoundError as error:
@@ -772,7 +778,9 @@ def create_app(config: Path | None = None, jobs_root: Path | None = None,
         path = output_path(request, job_id, name)
         if path.suffix.lower() not in ('.wikitext', '.txt', '.lua', '.json'):
             raise HTTPException(415, 'This file does not have a text preview.')
-        if path.stat().st_size > 1048576:
+        from utils.enemyAI import RESULT_FILE
+        limit = 16 * 1048576 if name == RESULT_FILE and get_job(request, job_id).tool_id == 'enemy-ai' else 1048576
+        if path.stat().st_size > limit:
             raise HTTPException(413, 'This file is too large to preview. Download it instead.')
         return {'text': path.read_text(encoding='utf-8')}
 
